@@ -91,9 +91,15 @@ Highlights:
 | GET    | `/search?q=…&limit=…` | Cross-project ILIKE search |
 | GET    | `/members` | Workspace members |
 | GET    | `/invitations` | Pending invitations |
-| POST   | `/invitations` | Invite by email + role |
+| POST   | `/invitations` | Invite by email + role (+ optional `boardGrants` on `member` invites) |
+| GET    | `/projects/{id}/members` | Board members: explicit grants + implicit workspace-admin / workspace-visible (each row has a `source`) |
+| POST   | `/projects/{id}/members` | Grant a workspace member board access. Body `{userId, role}`, role ∈ `{admin, contributor}`. Board-admin only |
+| PATCH  | `/projects/{id}/members/{userId}` | Change an explicit grant's role. Board-admin only |
+| DELETE | `/projects/{id}/members/{userId}` | Remove a grant (board-admin, or a contributor removing themselves) |
 
-Endpoints intentionally NOT exposed via token auth: `/auth/*` (browser-bound), `/api-keys` (recursion), `/billing/*` (Paddle flows), `/me/avatar` upload.
+`GET /me` returns `id, email, name, username, avatarUrl, hasPassword, emailVerified` plus `newsletterSubscribed` / `newsletterAvailable`.
+
+Endpoints intentionally NOT exposed via token auth (session + CSRF only): `/auth/*` (browser-bound), `/api-keys` (recursion), `/billing/*` (Paddle flows), `/me/avatar` upload, `/me/newsletter`, `/workspace` (rename), `/support`.
 
 ## Pitfalls Claude commonly gets wrong
 
@@ -115,7 +121,7 @@ These are the bugs Claude reliably introduces. Re-read this list before generati
 
 8. **Patches are partial via `COALESCE`.** Send only the fields you want changed. Don't echo unmodified fields back - it works, but masks bugs (e.g. accidentally clearing a field by sending `null`).
 
-9. **Many endpoints 404 instead of 403 for non-membership.** Authorization runs at the SQL layer through `workspace_members`. A card you can't see returns 404, indistinguishable from "doesn't exist". Don't infer existence from 404.
+9. **Many endpoints 404 instead of 403 for no-access.** Authorization runs at the SQL layer through *per-board* access — `accessible_projects` = explicit `project_members` grants ∪ workspace-visible boards ∪ implicit workspace owner/admin — **not** plain workspace membership. So being a workspace member does NOT guarantee you can see a given board: a card on a board you weren't granted returns 404, indistinguishable from "doesn't exist". Don't infer existence from 404. (Project responses carry `myBoardRole` `"admin"|"contributor"` and `visibility` `"private"|"workspace"` so you can tell what you're allowed to do.)
 
 10. **Optimistic state is the SPA's job, not yours.** When automating, just call PATCH and trust the response. Don't try to mimic the SPA's optimistic + SSE-deduped flow.
 

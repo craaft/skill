@@ -22,11 +22,12 @@ mkdir -p .claude/skills/craaft-api && \
 
 ## What it does
 
-When you ask Claude Code to script against Craaft - create cards, move them, list focus items, comment, search - and a `cra_*` personal access token is in scope, this skill loads automatically. Claude then knows:
+When you ask Claude Code to script against Craaft - create cards, move them, list focus items, comment, search, manage board access - and a `cra_*` personal access token is in scope, this skill loads automatically. Claude then knows:
 
 - The bearer auth shape and why `cra_` is mandatory.
 - Every error code Craaft returns and how to recover.
-- The full `/api/v1/...` surface and which endpoints are intentionally token-inaccessible (`/auth/*`, `/api-keys`, `/billing/*`).
+- The full `/api/v1/...` surface and which endpoints are intentionally token-inaccessible (`/auth/*`, `/api-keys`, `/billing/*`, and other session-only routes).
+- The per-board access model: visibility is granted board-by-board (`/projects/{id}/members`), not by plain workspace membership, so a board you weren't granted reads back as 404, not 403.
 - The traps: `position` is a float (midpoint reordering), `column` in card payloads is the *key* not the id, drag-drop is just `PATCH /cards/{id}`, etc.
 - Working `curl` and Python idioms with `Retry-After` handling.
 
