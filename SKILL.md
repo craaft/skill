@@ -1,6 +1,6 @@
 ---
 name: craaft-api
-description: Use when interacting with the Craaft Kanban JSON API - creating projects/columns/cards/comments, listing data across boards, drag-dropping cards via PATCH, or running any automation that authenticates with a `cra_*` bearer token. Triggers when the user mentions "Craaft API", "Craaft personal access token", a `cra_…` token, or a Craaft host (`craaft.io` or self-hosted). Does NOT apply to browser/SPA flows - those use cookie-based session auth and CSRF.
+description: Use when interacting with the Craaft Kanban JSON API - creating projects/columns/cards/comments, uploading card attachments, listing data across boards, drag-dropping cards via PATCH, or running any automation that authenticates with a `cra_*` bearer token. Triggers when the user mentions "Craaft API", "Craaft personal access token", a `cra_…` token, the Craaft Python SDK, or a Craaft host (`craaft.io` or self-hosted). Does NOT apply to browser/SPA flows - those use cookie-based session auth and CSRF.
 ---
 
 # Craaft API skill
@@ -8,7 +8,7 @@ description: Use when interacting with the Craaft Kanban JSON API - creating pro
 ## When to use
 
 This skill applies when:
-- The user asks to call the Craaft API directly (curl, fetch, requests, SDK).
+- The user asks to call the Craaft API directly (curl, fetch, requests, Python SDK).
 - A `cra_*` bearer token appears in the conversation, env, or instructions.
 - The user wants to automate Craaft - cron jobs, scripts, integrations.
 - The user asks "how do I create / move / list cards via the API".
@@ -42,10 +42,11 @@ All errors are `{"error": "<human readable>"}`. Status codes:
 |---|---|---|
 | 400 | Malformed body / missing field / invalid `?type` | Fix payload, retry |
 | 401 | Missing / bad / revoked token; sets `WWW-Authenticate: Bearer realm="craaft API"` | Ask user for a fresh token |
-| 402 | Plan limit (Free tier project cap = 3); body has `{limit, currentPlan, max, current}` | Surface upgrade path |
+| 402 | Plan limit — Free tier project cap (3) **or** attachment uploads on a Free workspace; body has `{error, limit, currentPlan, ...}` | Surface upgrade path |
 | 403 | Authenticated but not authorized; almost never via token | Stop, surface to user |
-| 404 | Resource missing OR caller isn't a workspace member - intentionally indistinguishable | Don't probe; report |
-| 409 | Duplicate (email/username already taken, column non-empty, etc.) | Adjust input |
+| 404 | Resource missing OR caller lacks board access - intentionally indistinguishable | Don't probe; report |
+| 409 | Duplicate (email/username taken, column non-empty, etc.) | Adjust input |
+| 413 | Upload exceeds 25 MiB attachment cap | Shrink file or split workflow |
 | 429 | Rate limit; carries `Retry-After: <seconds>` | Sleep, retry |
 | 5xx | Server bug | Retry once with backoff; report after 2 |
 
@@ -57,7 +58,7 @@ When automating: don't fan out > 30 parallel requests per token. For bulk import
 
 ## Surface (versioned: `/api/v1/...`)
 
-Authoritative spec is served at **`<HOST>/openapi.yaml`** (no auth required). Fetch the live URL when you need the current shape - the running binary serves it directly, so it's always exactly the version that handler is responding to:
+Authoritative spec is served at **`<HOST>/openapi.yaml`** (no auth required). Fetch the live URL when you need the current shape - the running binary serves it directly:
 
 ```bash
 curl -s "$HOST/openapi.yaml" > /tmp/craaft-openapi.yaml
@@ -67,143 +68,151 @@ Highlights:
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET    | `/me` | Current user (id, email, name, username, avatarUrl, hasPassword) |
-| PATCH  | `/me` | Partial update of name / email / username |
-| GET    | `/projects` | List your projects |
-| POST   | `/projects` | Create (`name`, `description?`) |
-| GET    | `/projects/{id}` | Single project + columns + counts |
-| PATCH  | `/projects/{id}` | Partial update |
+| GET | `/me` | Current user |
+| PATCH | `/me` | Partial update of name / email / username |
+| GET | `/projects` | List your projects |
+| POST | `/projects` | Create (`name`, `description?`) |
+| GET | `/projects/{id}` | Single project + columns + counts |
+| PATCH | `/projects/{id}` | Partial update (incl. `visibility`, `backgroundColor`) |
 | DELETE | `/projects/{id}` | Cascading delete |
-| POST   | `/projects/{id}/columns` | Add column (`title`) |
-| PATCH  | `/columns/{id}` | Update (title/color/position/isDone/cardLimit) |
+| GET | `/projects/{id}/export` | JSON export (project, columns, cards, comments, attachment metadata) |
+| POST | `/projects/{id}/share` | Enable public read-only sharing → `{publicToken}` |
+| DELETE | `/projects/{id}/share` | Revoke sharing |
+| POST | `/projects/{id}/columns` | Add column (`title`) |
+| GET | `/projects/{id}/cards` | All cards in a project |
+| POST | `/projects/{id}/cards` | Create card (`title`, `column`, `position`, optional `description` only) |
+| GET | `/projects/{id}/tags` | Distinct tags on the board's cards |
+| GET | `/cards/{id}/attachments` | List attachments on a card |
+| POST | `/cards/{id}/attachments` | Upload file (`multipart/form-data`, field `file`, max 25 MiB; Pro workspace) |
+| PATCH | `/columns/{id}` | Update (title/color/position/isDone/cardLimit) |
+| POST | `/columns/{id}/archive` | Archive every card in the column |
 | DELETE | `/columns/{id}` | 409 if non-empty |
-| GET    | `/projects/{id}/cards` | All cards in a project |
-| POST   | `/projects/{id}/cards` | Create card |
-| PATCH  | `/cards/{id}` | Update card (also drag-drop via column+position) |
+| PATCH | `/cards/{id}` | Update card metadata + same-board drag-drop |
 | DELETE | `/cards/{id}` | Delete |
-| GET    | `/cards/upcoming` | Cross-project due-dated cards |
-| GET    | `/cards/focus` | Three-section Focus envelope: due / attention / hygiene |
-| GET    | `/cards/hygiene?type=ghosts\|stuck\|mine_no_date` | Drill into a hygiene category |
-| GET    | `/cards/{id}/comments` | List, oldest-first |
-| POST   | `/cards/{id}/comments` | Add comment (`body`) |
-| PATCH  | `/comments/{id}` | Edit (author only) |
+| POST | `/cards/{id}/move` | Move card to another board (`targetProjectId`, `column`) |
+| GET | `/cards/{id}/events` | Activity log (moves, priority, assignee), oldest-first |
+| GET | `/cards/{id}/comments` | List, oldest-first |
+| POST | `/cards/{id}/comments` | Add comment (`body`) |
+| GET | `/attachments/{id}` | Download attachment bytes |
+| DELETE | `/attachments/{id}` | Delete attachment |
+| GET | `/cards/upcoming` | Cross-project due-dated cards |
+| GET | `/cards/focus` | Focus envelope: `due` / `attention` / `hygiene` counts |
+| GET | `/cards/hygiene?type=ghosts\|stuck\|mine_no_date` | Hygiene drill-down |
+| PATCH | `/comments/{id}` | Edit (author only) |
 | DELETE | `/comments/{id}` | Delete (author or workspace owner/admin) |
-| GET    | `/search?q=…&limit=…` | Cross-project ILIKE search |
-| GET    | `/members` | Workspace members |
-| GET    | `/invitations` | Pending invitations |
-| POST   | `/invitations` | Invite by email + role (+ optional `boardGrants` on `member` invites) |
-| GET    | `/projects/{id}/members` | Board members: explicit grants + implicit workspace-admin / workspace-visible (each row has a `source`) |
-| POST   | `/projects/{id}/members` | Grant a workspace member board access. Body `{userId, role}`, role ∈ `{admin, contributor}`. Board-admin only |
-| PATCH  | `/projects/{id}/members/{userId}` | Change an explicit grant's role. Board-admin only |
-| DELETE | `/projects/{id}/members/{userId}` | Remove a grant (board-admin, or a contributor removing themselves) |
+| GET | `/search?q=…&limit=…` | Cross-project ILIKE search |
+| GET | `/members` | Workspace members (`joinedAt`, optional `boardAccess`) |
+| GET | `/invitations` | Pending invitations |
+| POST | `/invitations` | Invite by email + role (+ optional `boardGrants` on `member` invites) |
+| GET | `/projects/{id}/members` | Board members (explicit + implicit; each row has `source`) |
+| POST | `/projects/{id}/members` | Grant board access `{userId, role}` (`admin` \| `contributor`). Board-admin only |
+| PATCH | `/projects/{id}/members/{userId}` | Change explicit grant role |
+| DELETE | `/projects/{id}/members/{userId}` | Remove grant (board-admin, or self-remove) |
 
 `GET /me` returns `id, email, name, username, avatarUrl, hasPassword, emailVerified` plus `newsletterSubscribed` / `newsletterAvailable`.
 
-Endpoints intentionally NOT exposed via token auth (session + CSRF only): `/auth/*` (browser-bound), `/api-keys` (recursion), `/billing/*` (Paddle flows), `/me/avatar` upload, `/me/newsletter`, `/workspace` (rename), `/support`.
+Project responses include `myRole`, `myBoardRole`, `visibility`, and `canUploadAttachments` (reflects the **board's workspace plan**, not the caller's).
+
+Endpoints intentionally **not** exposed via token auth (session + CSRF only): `/auth/*`, `/api-keys`, `/billing/*`, `/me/avatar` upload, `/me/newsletter`, `/workspace`, `/support`.
 
 ## Pitfalls Claude commonly gets wrong
 
-These are the bugs Claude reliably introduces. Re-read this list before generating Craaft API code.
+1. **`position` is a `float64`, not an integer.** Midpoint reordering: between siblings at 2 and 3, send `2.5`. Head insert above position 1 → `0.5`.
 
-1. **`position` is a `float64`, not an integer.** Cards (and columns) reorder by midpoint - to drop a card between two siblings at positions 2 and 3, send `position: 2.5`. To insert at the head with a head card at position 1, send `0.5`. Don't send integer indexes - they collide and silently land in the wrong slot.
+2. **`column` in card payloads is the column `key`, NOT its `id`.** Use `columns[].key` from the project response.
 
-2. **In card payloads, `column` is the column's `key`, NOT its `id`.** Keys (`"todo"`, `"doing"`, `"done"`, or per-project custom strings) are stable across moves; ids are internal UUIDs. The board GET response gives you `columns[].key` - use that.
+3. **Same-board moves use `PATCH /cards/{id}` with `{column, position}`.** Cross-board moves use **`POST /cards/{id}/move`** with `{targetProjectId, column}`.
 
-3. **Drag-drop is a card PATCH, not a separate endpoint.** Send `{column, position}` to `PATCH /cards/{id}`. The same handler covers metadata edits (title/description/dueDate/...).
+4. **`POST /projects/{id}/cards` only accepts `title`, `column`, `position`, optional `description`.** Set `dueDate`, `assignedUserId`, `size`, `priority`, `tags` via **`PATCH /cards/{id}`** after create.
 
-4. **`/api/v1/` is mandatory.** The legacy unversioned mount was retired. `GET /api/me` returns 404; `GET /api/v1/me` is correct.
+5. **Assignee field is `assignedUserId`, not `assigneeId`.** The server JSON key is `assignedUserId`.
 
-5. **Don't send CSRF headers on bearer-authed calls.** The server's CSRF middleware exempts requests with `Authorization: Bearer …`. Sending an `X-CSRF-Token` is harmless but unnecessary.
+6. **`size` is an optional integer** (estimate), not `xs`/`s`/`m`/`l`/`xl`.
 
-6. **List endpoints return `[]` not `null` when empty.** Don't null-guard with `?? []` on top of code that does it; you'll add a redundant fallback.
+7. **`priority` values are `low`, `medium`, `high`, `urgent`** — there is no `normal`.
 
-7. **`dueDate` is `YYYY-MM-DD` (date), `createdAt`/`updatedAt` are RFC3339 timestamps.** Don't pass a full timestamp where a date is expected; the server will error with a parse hint.
+8. **`/api/v1/` is mandatory.** `GET /api/me` returns 404.
 
-8. **Patches are partial via `COALESCE`.** Send only the fields you want changed. Don't echo unmodified fields back - it works, but masks bugs (e.g. accidentally clearing a field by sending `null`).
+9. **Don't send CSRF headers on bearer-authed calls.**
 
-9. **Many endpoints 404 instead of 403 for no-access.** Authorization runs at the SQL layer through *per-board* access — `accessible_projects` = explicit `project_members` grants ∪ workspace-visible boards ∪ implicit workspace owner/admin — **not** plain workspace membership. So being a workspace member does NOT guarantee you can see a given board: a card on a board you weren't granted returns 404, indistinguishable from "doesn't exist". Don't infer existence from 404. (Project responses carry `myBoardRole` `"admin"|"contributor"` and `visibility` `"private"|"workspace"` so you can tell what you're allowed to do.)
+10. **List endpoints return `[]` not `null` when empty.**
 
-10. **Optimistic state is the SPA's job, not yours.** When automating, just call PATCH and trust the response. Don't try to mimic the SPA's optimistic + SSE-deduped flow.
+11. **`dueDate` on PATCH accepts RFC3339 datetimes** (and date strings parse). `createdAt`/`updatedAt` are always RFC3339.
+
+12. **Patches are partial.** Send only changed fields. Use `null` on nullable fields to clear (`dueDate`, `assignedUserId`, `size`, `priority`).
+
+13. **404 means "no access OR doesn't exist".** Per-board access: workspace membership alone doesn't guarantee a board. Check `myBoardRole` / `visibility` on the project.
+
+14. **Attachments upload via `multipart/form-data`** with a single `file` part — not JSON. Requires Pro/Team workspace (`402` on Free). Check `canUploadAttachments` on the project first.
+
+15. **Optimistic state is the SPA's job, not yours.** Call the API and trust the response.
 
 ## Common workflows
 
-Each example assumes:
 ```bash
 HOST=https://craaft.io
-TOKEN=cra_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TOKEN=cra_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   # or $CRAAFT_API_TOKEN
 ```
 
-Use `$CRAAFT_TOKEN` from env in real code; do not paste tokens in scripts you save.
+Never commit real tokens.
 
-### Get the current user (smoke test)
+### Smoke test
 
 ```bash
 curl -s -H "Authorization: Bearer $TOKEN" "$HOST/api/v1/me"
 ```
 
-### List projects
+### Create a card, then set metadata
 
 ```bash
-curl -s -H "Authorization: Bearer $TOKEN" "$HOST/api/v1/projects" | jq '.[].name'
-```
-
-### Add a card to the first column of the first project
-
-```bash
-PROJECT_ID=$(curl -s -H "Authorization: Bearer $TOKEN" \
-  "$HOST/api/v1/projects" | jq -r '.[0].id')
-
-# Pull columns + existing cards so we know the column key + a sane position.
-PROJECT=$(curl -s -H "Authorization: Bearer $TOKEN" "$HOST/api/v1/projects/$PROJECT_ID")
-COLUMN_KEY=$(echo "$PROJECT" | jq -r '.columns[0].key')
-
-# Position 1 puts the card at the head if no card already has position <= 1.
-# For a robust insert at head, fetch cards in that column and pick min - 1.
-curl -s -H "Authorization: Bearer $TOKEN" \
+CARD=$(curl -s -H "Authorization: Bearer $TOKEN" \
      -H "Content-Type: application/json" \
-     -d "$(jq -n --arg c "$COLUMN_KEY" --arg t "Triaged from API" \
-          '{title:$t, column:$c, position:1}')" \
-     "$HOST/api/v1/projects/$PROJECT_ID/cards"
+     -d '{"title":"From API","column":"todo","position":1}' \
+     "$HOST/api/v1/projects/$PROJECT_ID/cards")
+
+CARD_ID=$(echo "$CARD" | jq -r '.id')
+
+curl -s -X PATCH -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"dueDate":"2026-06-15T00:00:00Z","assignedUserId":"<user-uuid>","priority":"high","size":3,"tags":["api"]}' \
+     "$HOST/api/v1/cards/$CARD_ID"
 ```
 
-### Move a card (drag-drop equivalent)
+### Same-board drag-drop
 
 ```bash
-# Move card $CARD_ID to "doing" column, between cards at positions 4 and 5.
 curl -s -X PATCH -H "Authorization: Bearer $TOKEN" \
      -H "Content-Type: application/json" \
      -d '{"column":"doing","position":4.5}' \
      "$HOST/api/v1/cards/$CARD_ID"
 ```
 
-### Set a due date + assignee
+### Cross-board move
 
 ```bash
-curl -s -X PATCH -H "Authorization: Bearer $TOKEN" \
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
      -H "Content-Type: application/json" \
-     -d '{"dueDate":"2026-06-15","assigneeId":"<user-uuid>","priority":"high"}' \
-     "$HOST/api/v1/cards/$CARD_ID"
+     -d '{"targetProjectId":"<other-project-uuid>","column":"todo"}' \
+     "$HOST/api/v1/cards/$CARD_ID/move"
 ```
 
-### Comment on a card
+### Upload an attachment
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     -F "file=@screenshot.png" \
+     "$HOST/api/v1/cards/$CARD_ID/attachments"
+```
+
+### Download an attachment
 
 ```bash
 curl -s -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"body":"Please review by Friday"}' \
-     "$HOST/api/v1/cards/$CARD_ID/comments"
+     -o screenshot.png \
+     "$HOST/api/v1/attachments/$ATTACHMENT_ID"
 ```
 
-### Cross-project search
-
-```bash
-curl -sG -H "Authorization: Bearer $TOKEN" \
-     --data-urlencode "q=migration" \
-     --data-urlencode "limit=10" \
-     "$HOST/api/v1/search" | jq '.cards[] | {title, projectName: .projectId}'
-```
-
-### "What should I focus on?" snapshot
+### Focus snapshot
 
 ```bash
 curl -s -H "Authorization: Bearer $TOKEN" "$HOST/api/v1/cards/focus" | jq '
@@ -213,44 +222,38 @@ curl -s -H "Authorization: Bearer $TOKEN" "$HOST/api/v1/cards/focus" | jq '
 '
 ```
 
-## Python idiom
+## Python
+
+Official SDK (`pip install craaft`, v1.2+):
 
 ```python
-import os, requests
+import os
+from craaft import CraaftClient
 
-BASE  = "https://craaft.io/api/v1"
-TOKEN = os.environ["CRAAFT_TOKEN"]
-S = requests.Session()
-S.headers["Authorization"] = f"Bearer {TOKEN}"
-
-def craaft(method, path, **kw):
-    r = S.request(method, BASE + path, timeout=15, **kw)
-    if r.status_code == 429:
-        # Honor Retry-After strictly; sleeping a fraction less re-429s instantly.
-        import time
-        time.sleep(int(r.headers.get("Retry-After", "1")))
-        return craaft(method, path, **kw)
-    r.raise_for_status()
-    return r.json() if r.content else None
-
-projects = craaft("GET", "/projects")
-project  = craaft("GET", f"/projects/{projects[0]['id']}")
-column   = project["columns"][0]["key"]
-craaft("POST", f"/projects/{projects[0]['id']}/cards",
-       json={"title": "From Python", "column": column, "position": 1})
+with CraaftClient(api_key=os.environ["CRAAFT_API_TOKEN"]) as client:
+    project = client.projects.get("<project-id>")
+    card = client.projects.create_card(
+        project.id, title="From Python", column="todo", position=1.0
+    )
+    client.cards.update(card.id, priority="high", size=3, tags=["sdk"])
+    if project.can_upload_attachments:
+        att = client.attachments.upload(card.id, file="screenshot.png")
+        data = client.attachments.download(att.id)
 ```
+
+Env vars: `CRAAFT_API_TOKEN` (required), `CRAAFT_BASE_URL` (optional, default `https://craaft.io/api/v1`).
+
+Raw `requests` works too — same bearer header, honour `Retry-After` on 429.
 
 ## When the spec drifts
 
-This skill is an interpretation of the OpenAPI spec at the time of writing. If a request returns an unexpected field or 400 with a message about an unknown property:
-
-1. Fetch the live spec: `curl -s "$HOST/openapi.yaml"`. The running binary serves it directly, so it's always exactly the version that handler is responding to.
-2. If the spec doesn't match the response either, the Go handler in `internal/cards/handlers.go` (etc.) is the actual implementation.
-3. Tell the user the discrepancy. Don't silently adapt - the docs may need an update.
+1. Fetch live spec: `curl -s "$HOST/openapi.yaml"`.
+2. If the spec doesn't match the response, read the Go handler in `internal/<resource>/handlers.go` in the main repo.
+3. Tell the user the discrepancy; update this skill if the API changed intentionally.
 
 ## Don't
 
-- Don't probe for resource existence (404 is intentionally ambiguous about membership vs nonexistence).
-- Don't paginate manually - endpoints either return capped results or have explicit limits in the spec.
-- Don't try to refresh tokens - tokens don't expire; revocation is the only lifecycle event. If 401, ask the user for a new token.
-- Don't store tokens in plain text. Env vars or a secret manager only.
+- Don't probe for resource existence via 404.
+- Don't paginate manually — endpoints return capped lists or explicit limits.
+- Don't refresh tokens — they don't expire; revocation is the only lifecycle event.
+- Don't store tokens in plain text.

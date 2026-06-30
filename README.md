@@ -25,19 +25,21 @@ mkdir -p .claude/skills/craaft-api && \
 When you ask Claude Code to script against Craaft - create cards, move them, list focus items, comment, search, manage board access - and a `cra_*` personal access token is in scope, this skill loads automatically. Claude then knows:
 
 - The bearer auth shape and why `cra_` is mandatory.
-- Every error code Craaft returns and how to recover.
-- The full `/api/v1/...` surface and which endpoints are intentionally token-inaccessible (`/auth/*`, `/api-keys`, `/billing/*`, and other session-only routes).
+- Every error code Craaft returns and how to recover (including `402` for projects and attachment uploads, `413` for oversized files).
+- The full `/api/v1/...` surface — projects, cards, comments, attachments, focus/hygiene, board access, export/share — and which endpoints are session-only.
 - The per-board access model: visibility is granted board-by-board (`/projects/{id}/members`), not by plain workspace membership, so a board you weren't granted reads back as 404, not 403.
-- The traps: `position` is a float (midpoint reordering), `column` in card payloads is the *key* not the id, drag-drop is just `PATCH /cards/{id}`, etc.
-- Working `curl` and Python idioms with `Retry-After` handling.
+- The traps: `position` is a float, `column` is the *key* not the id, card metadata is set via PATCH (not create), `assignedUserId` not `assigneeId`, attachments are multipart, etc.
+- Working `curl` examples and the official Python SDK (`pip install craaft`).
 
 The intent is that you can say *"add a 'review docs' card to my Inbox column with a Friday due date"* and get a correct API call instead of a plausible-looking one.
 
 **Then export a token (mint one in Craaft > Settings > API keys; it's shown once):**
 
 ```bash
-export CRAAFT_TOKEN=cra_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+export CRAAFT_API_TOKEN=cra_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
+
+(`CRAAFT_TOKEN` also works in curl examples; the Python SDK reads `CRAAFT_API_TOKEN`.)
 
 To update later, re-run the same `curl`. To remove, delete the `craaft-api` directory.
 
