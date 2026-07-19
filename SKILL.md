@@ -1,6 +1,6 @@
 ---
 name: craaft-api
-description: Use when interacting with the Craaft Kanban JSON API - creating projects/columns/cards/comments, uploading card attachments, listing data across boards, drag-dropping cards via PATCH, or running any automation that authenticates with a `cra_*` bearer token. Triggers when the user mentions "Craaft API", "Craaft personal access token", a `cra_…` token, the Craaft Python SDK, or a Craaft host (`craaft.io` or self-hosted). Does NOT apply to browser/SPA flows - those use cookie-based session auth and CSRF.
+description: Use when interacting with the Craaft Kanban JSON API - creating projects/columns/cards/comments, bulk-importing or batch-updating/moving cards, managing checklists and milestones, uploading card attachments, listing data across boards, drag-dropping cards via PATCH, or running any automation that authenticates with a `cra_*` bearer token. Triggers when the user mentions "Craaft API", "Craaft personal access token", a `cra_…` token, the Craaft Python SDK, or a Craaft host (`craaft.io` or self-hosted). Does NOT apply to browser/SPA flows - those use cookie-based session auth and CSRF.
 ---
 
 # Craaft API skill
@@ -42,7 +42,7 @@ All errors are `{"error": "<human readable>"}`. Status codes:
 |---|---|---|
 | 400 | Malformed body / missing field / invalid `?type` | Fix payload, retry |
 | 401 | Missing / bad / revoked token; sets `WWW-Authenticate: Bearer realm="craaft API"` | Ask user for a fresh token |
-| 402 | Plan limit — Free tier project cap (3) **or** attachment uploads on a Free workspace; body has `{error, limit, currentPlan, ...}` | Surface upgrade path |
+| 402 | Plan limit - Free tier project cap (3) **or** attachment uploads on a Free workspace; body has `{error, limit, currentPlan, ...}` | Surface upgrade path |
 | 403 | Authenticated but not authorized; almost never via token | Stop, surface to user |
 | 404 | Resource missing OR caller lacks board access - intentionally indistinguishable | Don't probe; report |
 | 409 | Duplicate (email/username taken, column non-empty, etc.) | Adjust input |
@@ -54,7 +54,7 @@ All errors are `{"error": "<human readable>"}`. Status codes:
 
 Per-token bucket: **60 burst + 1 req/sec sustained.** In-memory per Cloud Run replica - the effective ceiling scales with horizontal replicas.
 
-When automating: don't fan out > 30 parallel requests per token. For bulk imports, throttle to ~1/sec or batch. Honor `Retry-After` strictly; it's the next-token-available delay.
+When automating: don't fan out > 30 parallel requests per token. For bulk imports, prefer the bulk endpoints (since 2026-07-18) - one request spends one rate-limit token for up to 100 cards, vs 100 tokens for 100 single creates. Honor `Retry-After` strictly; it's the next-token-available delay.
 
 ## Surface (versioned: `/api/v1/...`)
 
@@ -81,6 +81,7 @@ Highlights:
 | POST | `/projects/{id}/columns` | Add column (`title`) |
 | GET | `/projects/{id}/cards` | All cards in a project |
 | POST | `/projects/{id}/cards` | Create card (`title`, `column`, `position`, optional `description` only) |
+| POST | `/projects/{id}/cards/bulk` | Create up to 100 cards in one transaction - items DO take full metadata |
 | GET | `/projects/{id}/tags` | Distinct tags on the board's cards |
 | GET | `/cards/{id}/attachments` | List attachments on a card |
 | POST | `/cards/{id}/attachments` | Upload file (`multipart/form-data`, field `file`, max 25 MiB; Pro workspace) |
@@ -88,11 +89,21 @@ Highlights:
 | POST | `/columns/{id}/archive` | Archive every card in the column |
 | DELETE | `/columns/{id}` | 409 if non-empty |
 | PATCH | `/cards/{id}` | Update card metadata + same-board drag-drop |
+| PATCH | `/cards/bulk` | Up to 100 partial updates in one transaction (items are `{id, ...patch}`) |
 | DELETE | `/cards/{id}` | Delete |
 | POST | `/cards/{id}/move` | Move card to another board (`targetProjectId`, `column`) |
+| POST | `/cards/bulk/move` | Sweep/move up to 100 cards (`ids`, `column`, optional `targetProjectId`) |
 | GET | `/cards/{id}/events` | Activity log (moves, priority, assignee), oldest-first |
 | GET | `/cards/{id}/comments` | List, oldest-first |
 | POST | `/cards/{id}/comments` | Add comment (`body`) |
+| GET | `/cards/{id}/checklist` | List checklist items, ordered by position |
+| POST | `/cards/{id}/checklist` | Add item (`text`, max 1000 chars); appends to the end |
+| PATCH | `/checklist/{id}` | Update item (`text` and/or `done`) |
+| DELETE | `/checklist/{id}` | Delete item |
+| GET | `/projects/{id}/milestones` | List milestones (date asc) |
+| POST | `/projects/{id}/milestones` | Add (`name`, `dueOn` as `YYYY-MM-DD`); board-admin only |
+| PATCH | `/milestones/{id}` | Update (`name`, `dueOn`, `achieved` bool); board-admin only |
+| DELETE | `/milestones/{id}` | Delete; board-admin only |
 | GET | `/attachments/{id}` | Download attachment bytes |
 | DELETE | `/attachments/{id}` | Delete attachment |
 | GET | `/cards/upcoming` | Cross-project due-dated cards |
@@ -115,6 +126,30 @@ Project responses include `myRole`, `myBoardRole`, `visibility`, and `canUploadA
 
 Endpoints intentionally **not** exposed via token auth (session + CSRF only): `/auth/*`, `/api-keys`, `/billing/*`, `/me/avatar` upload, `/me/newsletter`, `/workspace`, `/support`.
 
+## Bulk card operations (since 2026-07-18)
+
+Three endpoints batch card work: `POST /projects/{id}/cards/bulk`
+(create), `PATCH /cards/bulk` (update), `POST /cards/bulk/move` (move).
+Shared rules:
+
+- **Max 100 items**; request body limit 1 MiB (vs 64 KiB elsewhere).
+- **All-or-nothing transactions.** One bad item rolls back the whole
+  batch; the error names the offending index: `{"error":"cards[3]: title is required"}`.
+  Never assume a failed batch was partially applied - it wasn't.
+- **No notification emails** (mentions / moves / assignments stay
+  silent). Activity events and realtime SSE fire normally.
+- Responses are `{"cards":[...]}` in request order (create returns 201,
+  the others 200).
+- Bulk create items take **full metadata** (`dueDate`, `assignedUserId`,
+  `size`, `priority`, `tags`) - unlike the single create. Omitted
+  `position` appends to the end of the column in request order. The
+  assignee is NOT defaulted to the caller (single create does that).
+- Bulk update items are `{id, ...}` plus any single-PATCH field, same
+  semantics (present = apply, `null` = clear, absent = leave).
+- Bulk move without `targetProjectId` requires every id on the SAME
+  board (400 otherwise); with it, moves the batch to that board (same
+  workspace only). Cards append to the end of the target column.
+
 ## Pitfalls Claude commonly gets wrong
 
 1. **`position` is a `float64`, not an integer.** Midpoint reordering: between siblings at 2 and 3, send `2.5`. Head insert above position 1 → `0.5`.
@@ -123,13 +158,13 @@ Endpoints intentionally **not** exposed via token auth (session + CSRF only): `/
 
 3. **Same-board moves use `PATCH /cards/{id}` with `{column, position}`.** Cross-board moves use **`POST /cards/{id}/move`** with `{targetProjectId, column}`.
 
-4. **`POST /projects/{id}/cards` only accepts `title`, `column`, `position`, optional `description`.** Set `dueDate`, `assignedUserId`, `size`, `priority`, `tags` via **`PATCH /cards/{id}`** after create.
+4. **`POST /projects/{id}/cards` only accepts `title`, `column`, `position`, optional `description`.** Set `dueDate`, `assignedUserId`, `size`, `priority`, `tags` via **`PATCH /cards/{id}`** after create - or create via **`POST /projects/{id}/cards/bulk`**, whose items accept full metadata directly (works fine with a single item).
 
 5. **Assignee field is `assignedUserId`, not `assigneeId`.** The server JSON key is `assignedUserId`.
 
 6. **`size` is an optional integer** (estimate), not `xs`/`s`/`m`/`l`/`xl`.
 
-7. **`priority` values are `low`, `medium`, `high`, `urgent`** — there is no `normal`.
+7. **`priority` values are `low`, `medium`, `high`, `urgent`** - there is no `normal`.
 
 8. **`/api/v1/` is mandatory.** `GET /api/me` returns 404.
 
@@ -143,9 +178,15 @@ Endpoints intentionally **not** exposed via token auth (session + CSRF only): `/
 
 13. **404 means "no access OR doesn't exist".** Per-board access: workspace membership alone doesn't guarantee a board. Check `myBoardRole` / `visibility` on the project.
 
-14. **Attachments upload via `multipart/form-data`** with a single `file` part — not JSON. Requires Pro/Team workspace (`402` on Free). Check `canUploadAttachments` on the project first.
+14. **Attachments upload via `multipart/form-data`** with a single `file` part - not JSON. Requires Pro/Team workspace (`402` on Free). Check `canUploadAttachments` on the project first.
 
 15. **Optimistic state is the SPA's job, not yours.** Call the API and trust the response.
+
+16. **Don't loop single creates for imports.** `POST /projects/{id}/cards/bulk` does up to 100 cards in one transaction and one rate-limit token. Looping 100 `POST /cards` calls burns the whole rate budget and leaves a half-imported board if one fails mid-way; the bulk endpoint leaves either everything or nothing.
+
+17. **Bulk create doesn't self-assign; single create does.** `POST /projects/{id}/cards` sets `assignedUserId` to the caller automatically; bulk items leave it `null` unless you send it.
+
+18. **`POST /cards/bulk/move` ids must share a board unless `targetProjectId` is set.** Mixed-board ids without a target return 400. Cross-workspace targets return 404 (not 403) - same non-probing rule as everything else.
 
 ## Common workflows
 
@@ -177,6 +218,43 @@ curl -s -X PATCH -H "Authorization: Bearer $TOKEN" \
      -d '{"dueDate":"2026-06-15T00:00:00Z","assignedUserId":"<user-uuid>","priority":"high","size":3,"tags":["api"]}' \
      "$HOST/api/v1/cards/$CARD_ID"
 ```
+
+### Bulk import (one transaction, full metadata)
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"cards":[
+           {"title":"Spec the flow","column":"todo","priority":"high","tags":["import"]},
+           {"title":"Build it","column":"todo","size":5},
+           {"title":"Ship it","column":"doing","dueDate":"2026-08-01T12:00:00Z"}
+         ]}' \
+     "$HOST/api/v1/projects/$PROJECT_ID/cards/bulk"
+```
+
+### Bulk update
+
+```bash
+curl -s -X PATCH -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"cards":[
+           {"id":"<card-1>","priority":"urgent"},
+           {"id":"<card-2>","dueDate":null}
+         ]}' \
+     "$HOST/api/v1/cards/bulk"
+```
+
+### Sweep several cards to a column
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"ids":["<card-1>","<card-2>","<card-3>"],"column":"done"}' \
+     "$HOST/api/v1/cards/bulk/move"
+```
+
+Add `"targetProjectId":"<other-project-uuid>"` to move the batch to
+another board in the same workspace instead.
 
 ### Same-board drag-drop
 
@@ -243,7 +321,7 @@ with CraaftClient(api_key=os.environ["CRAAFT_API_TOKEN"]) as client:
 
 Env vars: `CRAAFT_API_TOKEN` (required), `CRAAFT_BASE_URL` (optional, default `https://craaft.io/api/v1`).
 
-Raw `requests` works too — same bearer header, honour `Retry-After` on 429.
+Raw `requests` works too - same bearer header, honour `Retry-After` on 429.
 
 ## When the spec drifts
 
@@ -254,6 +332,6 @@ Raw `requests` works too — same bearer header, honour `Retry-After` on 429.
 ## Don't
 
 - Don't probe for resource existence via 404.
-- Don't paginate manually — endpoints return capped lists or explicit limits.
-- Don't refresh tokens — they don't expire; revocation is the only lifecycle event.
+- Don't paginate manually - endpoints return capped lists or explicit limits.
+- Don't refresh tokens - they don't expire; revocation is the only lifecycle event.
 - Don't store tokens in plain text.
