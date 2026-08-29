@@ -1,6 +1,6 @@
 ---
 name: craaft-api
-description: Use when interacting with the Craaft Kanban JSON API - creating projects/columns/cards/comments, bulk-importing or batch-updating/moving cards, managing checklists and milestones, uploading card attachments, listing data across boards, drag-dropping cards via PATCH, or running any automation that authenticates with a `cra_*` bearer token. Triggers when the user mentions "Craaft API", "Craaft personal access token", a `cra_…` token, the Craaft Python SDK, or a Craaft host (`craaft.io` or self-hosted). Does NOT apply to browser/SPA flows - those use cookie-based session auth and CSRF.
+description: Use when interacting with the Craaft Kanban JSON API - creating projects/columns/cards/comments, reading or updating a single card, bulk-importing or batch-updating/moving cards, managing checklists and milestones, tags, board members and board access, uploading card attachments or board backgrounds, following cards, reading the focus/hygiene views, listing data across boards, drag-dropping cards via PATCH, or running any automation that authenticates with a `cra_*` bearer token. Triggers when the user mentions "Craaft API", "Craaft personal access token", a `cra_…` token, the Craaft Python SDK, or a Craaft host (`craaft.io` or self-hosted). Does NOT apply to browser/SPA flows - those use cookie-based session auth and CSRF.
 ---
 
 # Craaft API skill
@@ -75,19 +75,25 @@ Highlights:
 | GET | `/projects/{id}` | Single project + columns + counts |
 | PATCH | `/projects/{id}` | Partial update (incl. `visibility`, `backgroundColor`) |
 | DELETE | `/projects/{id}` | Cascading delete |
-| GET | `/projects/{id}/export` | JSON export (project, columns, cards, comments, attachment metadata) |
+| GET | `/projects/{id}/export?format=json\|csv` | Export the board (project, columns, cards, comments, attachment metadata). Defaults to JSON |
 | POST | `/projects/{id}/share` | Enable public read-only sharing → `{publicToken}` |
 | DELETE | `/projects/{id}/share` | Revoke sharing |
 | POST | `/projects/{id}/columns` | Add column (`title`) |
 | GET | `/projects/{id}/cards` | All cards in a project |
 | POST | `/projects/{id}/cards` | Create card (`title`, `column`, `position`, optional `description` only) |
 | POST | `/projects/{id}/cards/bulk` | Create up to 100 cards in one transaction - items DO take full metadata |
-| GET | `/projects/{id}/tags` | Distinct tags on the board's cards |
+| POST | `/projects/{id}/cards/rebalance` | Renumber a column's cards to 1, 2, 3, … in request order (up to 10 000 ids) |
+| GET | `/projects/{id}/tags` | Distinct tags on the board's cards (includes archived cards) |
+| POST | `/projects/{id}/background-image` | Upload a board background (`multipart/form-data`, field `file`, max 10 MiB). Board-admin only |
+| GET | `/projects/{id}/background-image` | Download the board background bytes |
+| DELETE | `/projects/{id}/background-image` | Remove the background. Board-admin only |
+| GET | `/projects/{id}/events` | **SSE stream** (realtime), NOT an activity log - see pitfall 19 |
 | GET | `/cards/{id}/attachments` | List attachments on a card |
 | POST | `/cards/{id}/attachments` | Upload file (`multipart/form-data`, field `file`, max 25 MiB; Pro workspace) |
 | PATCH | `/columns/{id}` | Update (title/color/position/isDone/cardLimit) |
 | POST | `/columns/{id}/archive` | Archive every card in the column |
 | DELETE | `/columns/{id}` | 409 if non-empty |
+| GET | `/cards/{id}` | Fetch one card (same shape PATCH returns, including `following`) |
 | PATCH | `/cards/{id}` | Update card metadata + same-board drag-drop |
 | PATCH | `/cards/bulk` | Up to 100 partial updates in one transaction (items are `{id, ...patch}`) |
 | DELETE | `/cards/{id}` | Delete |
@@ -95,7 +101,9 @@ Highlights:
 | POST | `/cards/bulk/move` | Sweep/move up to 100 cards (`ids`, `column`, optional `targetProjectId`) |
 | GET | `/cards/{id}/events` | Activity log (moves, priority, assignee), oldest-first |
 | GET | `/cards/{id}/comments` | List, oldest-first |
-| POST | `/cards/{id}/comments` | Add comment (`body`) |
+| POST | `/cards/{id}/comments` | Add comment (`body`, max 5000 chars) |
+| POST | `/cards/{id}/follow` | Follow a card. Idempotent, `204`, no body |
+| DELETE | `/cards/{id}/follow` | Unfollow. Idempotent, `204`, no body |
 | GET | `/cards/{id}/checklist` | List checklist items, ordered by position |
 | POST | `/cards/{id}/checklist` | Add item (`text`, max 1000 chars); appends to the end |
 | PATCH | `/checklist/{id}` | Update item (`text` and/or `done`) |
@@ -113,18 +121,32 @@ Highlights:
 | DELETE | `/comments/{id}` | Delete (author or workspace owner/admin) |
 | GET | `/search?q=…&limit=…` | Cross-project ILIKE search |
 | GET | `/members` | Workspace members (`joinedAt`, optional `boardAccess`) |
+| PATCH | `/members/{userId}` | Change a member's workspace role. Owner/admin only |
+| DELETE | `/members/{userId}` | Remove from the workspace (also closes their SSE streams). Owner/admin only |
 | GET | `/invitations` | Pending invitations |
 | POST | `/invitations` | Invite by email + role (+ optional `boardGrants` on `member` invites) |
+| DELETE | `/invitations/{id}` | Revoke a pending invite so its accept link stops working. Owner/admin only |
 | GET | `/projects/{id}/members` | Board members (explicit + implicit; each row has `source`) |
 | POST | `/projects/{id}/members` | Grant board access `{userId, role}` (`admin` \| `contributor`). Board-admin only |
 | PATCH | `/projects/{id}/members/{userId}` | Change explicit grant role |
 | DELETE | `/projects/{id}/members/{userId}` | Remove grant (board-admin, or self-remove) |
 
+These four need no `Authorization` header at all:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/public/projects/{token}` | Read-only board snapshot for a share token |
+| GET | `/public/projects/{token}/background-image` | That board's background bytes |
+| GET | `/users/{id}/avatar` | A user's uploaded avatar bytes (`404` when they have none) |
+| GET | `/version` | Build/version info, useful as a liveness probe |
+
 `GET /me` returns `id, email, name, username, avatarUrl, hasPassword, emailVerified` plus `newsletterSubscribed` / `newsletterAvailable`.
 
-Project responses include `myRole`, `myBoardRole`, `visibility`, and `canUploadAttachments` (reflects the **board's workspace plan**, not the caller's).
+**Card responses** carry `id, projectId, column, title, description, position, dueDate, assignedUserId, assignedUserName, size, priority, tags, createdBy, createdByName, updatedBy, updatedByName, attachmentCount, checklistDone, checklistTotal, following, createdAt, updatedAt`. `checklistDone` / `checklistTotal` are denormalized counts, so you get checklist progress without a second call; `following` is scoped to the authenticated caller.
 
-Endpoints intentionally **not** exposed via token auth (session + CSRF only): `/auth/*`, `/api-keys`, `/billing/*`, `/me/avatar` upload, `/me/newsletter`, `/workspace`, `/support`.
+**Project responses** include `myRole`, `myBoardRole`, `visibility`, `canUploadAttachments` (reflects the **board's workspace plan**, not the caller's), plus `isFavorite`, `publicToken` (non-empty only while sharing is on), `backgroundImage` / `backgroundColor` (mutually exclusive), `colorScheme`, `textColor`, `totalCards`, `columnCounts`, `workspaceName`, `members` and `columns`.
+
+Endpoints intentionally **not** exposed via token auth (session + CSRF only): `/auth/*`, `/api-keys`, `/billing/*`, `/admin/*`, `/me/avatar` upload+delete, `/me/newsletter`, `/workspace`, `/support`.
 
 ## Bulk card operations (since 2026-07-18)
 
@@ -187,6 +209,18 @@ Shared rules:
 17. **Bulk create doesn't self-assign; single create does.** `POST /projects/{id}/cards` sets `assignedUserId` to the caller automatically; bulk items leave it `null` unless you send it.
 
 18. **`POST /cards/bulk/move` ids must share a board unless `targetProjectId` is set.** Mixed-board ids without a target return 400. Cross-workspace targets return 404 (not 403) - same non-probing rule as everything else.
+
+19. **`GET /projects/{id}/events` is the realtime SSE stream, not a board activity log.** It opens a long-lived `text/event-stream` that never completes, so a normal request/response client will hang on it. Per-card history is **`GET /cards/{id}/events`** - a plain JSON array, oldest-first. The two are unrelated despite the matching path segment.
+
+20. **To read one card, use `GET /cards/{id}`.** Don't fetch `/projects/{id}/cards` and filter client-side. `404` when it doesn't exist or you have no board access, same as everywhere.
+
+21. **`tags` on PATCH replaces the whole set.** It isn't a merge: send the full array you want, or `[]` to clear. Max 12 tags per card, 32 chars each.
+
+22. **Follow / unfollow return `204` with no body.** Both are idempotent, so don't read a response object or treat a repeat call as an error.
+
+23. **`POST /projects/{id}/cards/rebalance` is not an import tool.** It renumbers cards already on the board onto one column as 1, 2, 3, … in request order, for when a drop can't find a representable midpoint. Every id must already be on that board (`404` otherwise). To create cards, use the bulk create endpoint.
+
+24. **Comment bodies cap at 5000 characters.** Longer bodies are rejected, so split or truncate before sending.
 
 ## Common workflows
 
@@ -290,6 +324,35 @@ curl -s -H "Authorization: Bearer $TOKEN" \
      "$HOST/api/v1/attachments/$ATTACHMENT_ID"
 ```
 
+### Read one card
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" "$HOST/api/v1/cards/$CARD_ID"
+```
+
+### Follow a card (204, no body)
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+     -X POST -H "Authorization: Bearer $TOKEN" \
+     "$HOST/api/v1/cards/$CARD_ID/follow"
+```
+
+### List the tags in use on a board
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" \
+     "$HOST/api/v1/projects/$PROJECT_ID/tags"
+```
+
+### Export a board as CSV
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" \
+     -o board.csv \
+     "$HOST/api/v1/projects/$PROJECT_ID/export?format=csv"
+```
+
 ### Focus snapshot
 
 ```bash
@@ -300,9 +363,22 @@ curl -s -H "Authorization: Bearer $TOKEN" "$HOST/api/v1/cards/focus" | jq '
 '
 ```
 
-## Python
+## Clients
 
-Official SDK (`pip install craaft`, v1.2+):
+There are three first-party SDKs and an MCP server. All of them speak the
+same bearer-token API described above, so anything missing from a client
+can still be reached with a raw request.
+
+| Client | Install | Notes |
+|---|---|---|
+| Python | `pip install craaft` (1.3+) | The most complete; example below |
+| JavaScript / TypeScript | `craaft` (1.0) | `src/resources/*.ts`, same resource layout |
+| PHP | `composer require craaft/craaft` | Requires PHP 8.2+ and ext-curl |
+| MCP server | remote HTTP endpoint | Exposes the API as tools for agents |
+
+None of the three SDKs wraps `GET /cards/{id}` yet - call it directly.
+
+### Python
 
 ```python
 import os
