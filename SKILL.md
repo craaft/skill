@@ -1,6 +1,6 @@
 ---
 name: craaft-api
-description: Use when interacting with the Craaft Kanban JSON API - creating projects/columns/cards/comments, reading or updating a single card, bulk-importing or batch-updating/moving cards, managing checklists and milestones, tags, board members and board access, uploading card attachments or board backgrounds, following cards, reading the focus/hygiene views, listing data across boards, drag-dropping cards via PATCH, or running any automation that authenticates with a `cra_*` bearer token. Triggers when the user mentions "Craaft API", "Craaft personal access token", a `cra_…` token, the Craaft Python SDK, or a Craaft host (`craaft.io` or self-hosted). Does NOT apply to browser/SPA flows - those use cookie-based session auth and CSRF.
+description: Use when interacting with the Craaft Kanban JSON API - creating projects (optionally from a board template such as sprint / bug-tracker / sales-pipeline), columns, cards and comments, reading or updating a single card or its full detail view, archiving and restoring cards or listing a board's archived cards, bulk-importing or batch-updating/moving cards, managing checklists and milestones, tags, board members, board access and workspace invitations, uploading card attachments or board backgrounds, following cards, reading the focus/hygiene views, searching across boards, drag-dropping cards via PATCH, configuring outbound webhooks (craaft signed JSON, Slack or Discord delivery, verifying `X-Craaft-Signature`) or email-to-card intake addresses, or running any automation that authenticates with a `cra_*` bearer token. Triggers when the user mentions "Craaft API", "Craaft personal access token", a `cra_…` token, "Craaft webhook", "Craaft email to card", the Craaft Python / JavaScript / PHP SDK, the Craaft MCP server, or a Craaft host (`craaft.io` or self-hosted). Does NOT apply to browser/SPA flows - those use cookie-based session auth and CSRF.
 ---
 
 # Craaft API skill
@@ -42,10 +42,10 @@ All errors are `{"error": "<human readable>"}`. Status codes:
 |---|---|---|
 | 400 | Malformed body / missing field / invalid `?type` | Fix payload, retry |
 | 401 | Missing / bad / revoked token; sets `WWW-Authenticate: Bearer realm="craaft API"` | Ask user for a fresh token |
-| 402 | Plan limit - Free tier project cap (3) **or** attachment uploads on a Free workspace; body has `{error, limit, currentPlan, ...}` | Surface upgrade path |
-| 403 | Authenticated but not authorized; almost never via token | Stop, surface to user |
+| 402 | Plan limit - Free tier project cap (3), attachment uploads, member invites, or integrations (webhooks / email-to-card, `limit: "integrations"`) on a Free workspace; body has `{error, limit, currentPlan, ...}` | Surface upgrade path |
+| 403 | Authenticated but not authorized - e.g. `requires board admin` on webhook / email-to-card routes when the caller can see the board but isn't a board admin | Stop, surface to user |
 | 404 | Resource missing OR caller lacks board access - intentionally indistinguishable | Don't probe; report |
-| 409 | Duplicate (email/username taken, column non-empty, etc.) | Adjust input |
+| 409 | Conflict (email/username taken, column still holds live cards, email-to-card already enabled, etc.) | Adjust input |
 | 413 | Upload exceeds 25 MiB attachment cap | Shrink file or split workflow |
 | 429 | Rate limit; carries `Retry-After: <seconds>` | Sleep, retry |
 | 5xx | Server bug | Retry once with backoff; report after 2 |
@@ -71,7 +71,8 @@ Highlights:
 | GET | `/me` | Current user |
 | PATCH | `/me` | Partial update of name / email / username |
 | GET | `/projects` | List your projects |
-| POST | `/projects` | Create (`name`, `description?`) |
+| POST | `/projects` | Create (`name`, `description?`, `template?` - a key from `/board-templates`; omitted = `kanban`) |
+| GET | `/board-templates` | Template catalogue: `[{key, name, description, columns: [{title, color, isDone}]}]` |
 | GET | `/projects/{id}` | Single project + columns + counts |
 | PATCH | `/projects/{id}` | Partial update (incl. `visibility`, `backgroundColor`) |
 | DELETE | `/projects/{id}` | Cascading delete |
@@ -79,7 +80,8 @@ Highlights:
 | POST | `/projects/{id}/share` | Enable public read-only sharing → `{publicToken}` |
 | DELETE | `/projects/{id}/share` | Revoke sharing |
 | POST | `/projects/{id}/columns` | Add column (`title`) |
-| GET | `/projects/{id}/cards` | All cards in a project |
+| GET | `/projects/{id}/cards` | All live cards in a project (**omits `description`** - use `GET /cards/{id}` or `/detail`) |
+| GET | `/projects/{id}/cards/archived` | Archived cards (same lean shape + `archivedAt`), newest first, max 200 |
 | POST | `/projects/{id}/cards` | Create card (`title`, `column`, `position`, optional `description` only) |
 | POST | `/projects/{id}/cards/bulk` | Create up to 100 cards in one transaction - items DO take full metadata |
 | POST | `/projects/{id}/cards/rebalance` | Renumber a column's cards to 1, 2, 3, … in request order (up to 10 000 ids) |
@@ -91,9 +93,12 @@ Highlights:
 | GET | `/cards/{id}/attachments` | List attachments on a card |
 | POST | `/cards/{id}/attachments` | Upload file (`multipart/form-data`, field `file`, max 25 MiB; Pro workspace) |
 | PATCH | `/columns/{id}` | Update (title/color/position/isDone/cardLimit) |
-| POST | `/columns/{id}/archive` | Archive every card in the column |
-| DELETE | `/columns/{id}` | 409 if non-empty |
-| GET | `/cards/{id}` | Fetch one card (same shape PATCH returns, including `following`) |
+| POST | `/columns/{id}/archive` | Archive every live card in a **done** column → `{archived, ids}` |
+| DELETE | `/columns/{id}` | 409 if it holds live cards; its archived cards move to the first remaining column |
+| GET | `/cards/{id}` | Fetch one card (same shape PATCH returns, including `following` and `description`) |
+| GET | `/cards/{id}/detail` | Card (with description) + comments + events (newest 100, oldest-first) + checklist + attachments |
+| POST | `/cards/{id}/archive` | Archive one card → `{archived: true, id}` |
+| POST | `/cards/{id}/restore` | Un-archive → full card, back in its original column + position |
 | PATCH | `/cards/{id}` | Update card metadata + same-board drag-drop |
 | PATCH | `/cards/bulk` | Up to 100 partial updates in one transaction (items are `{id, ...patch}`) |
 | DELETE | `/cards/{id}` | Delete |
@@ -119,17 +124,25 @@ Highlights:
 | GET | `/cards/hygiene?type=ghosts\|stuck\|mine_no_date` | Hygiene drill-down |
 | PATCH | `/comments/{id}` | Edit (author only) |
 | DELETE | `/comments/{id}` | Delete (author or workspace owner/admin) |
-| GET | `/search?q=…&limit=…` | Cross-project ILIKE search |
+| GET | `/search?q=…&limit=…` | Cross-project ILIKE search (`description` is a ≤180-char snippet; hits carry `archived`). `limit` defaults to 20, values over 50 clamp to 50 |
 | GET | `/members` | Workspace members (`joinedAt`, optional `boardAccess`) |
 | PATCH | `/members/{userId}` | Change a member's workspace role. Owner/admin only |
 | DELETE | `/members/{userId}` | Remove from the workspace (also closes their SSE streams). Owner/admin only |
 | GET | `/invitations` | Pending invitations |
-| POST | `/invitations` | Invite by email + role (+ optional `boardGrants` on `member` invites) |
+| POST | `/invitations` | Invite by email + role (+ optional `boardGrants` on `member` invites) → `{invitation, consumed}` wrapper. Pro only |
 | DELETE | `/invitations/{id}` | Revoke a pending invite so its accept link stops working. Owner/admin only |
 | GET | `/projects/{id}/members` | Board members (explicit + implicit; each row has `source`) |
 | POST | `/projects/{id}/members` | Grant board access `{userId, role}` (`admin` \| `contributor`). Board-admin only |
 | PATCH | `/projects/{id}/members/{userId}` | Change explicit grant role |
 | DELETE | `/projects/{id}/members/{userId}` | Remove grant (board-admin, or self-remove) |
+| GET | `/projects/{id}/webhooks` | `{webhooks: [...], eventCatalogue: [...]}`. Board admin, Pro |
+| POST | `/projects/{id}/webhooks` | Create `{url, description?, format?, events?}` → 201 subscription. Board admin, Pro |
+| PATCH | `/webhooks/{id}` | Partial update `{url?, description?, format?, events?, active?}`. `{id}` is the subscription id. Board admin, Pro |
+| DELETE | `/webhooks/{id}` | `204`. Board admin, **not** plan-gated |
+| GET | `/projects/{id}/inbound-email` | `{enabled: false, address: null}` or `{enabled: true, address}`. Board admin, Pro |
+| POST | `/projects/{id}/inbound-email` | Enable email-to-card `{targetColumn?}` → 201 address; 409 if already enabled. Board admin, Pro |
+| PATCH | `/projects/{id}/inbound-email` | `{active?, targetColumn?, rotate?}` → address. Board admin, Pro |
+| DELETE | `/projects/{id}/inbound-email` | `204`. Board admin, **not** plan-gated |
 
 These four need no `Authorization` header at all:
 
@@ -142,11 +155,63 @@ These four need no `Authorization` header at all:
 
 `GET /me` returns `id, email, name, username, avatarUrl, hasPassword, emailVerified` plus `newsletterSubscribed` / `newsletterAvailable`.
 
-**Card responses** carry `id, projectId, column, title, description, position, dueDate, assignedUserId, assignedUserName, size, priority, tags, createdBy, createdByName, updatedBy, updatedByName, attachmentCount, checklistDone, checklistTotal, following, createdAt, updatedAt`. `checklistDone` / `checklistTotal` are denormalized counts, so you get checklist progress without a second call; `following` is scoped to the authenticated caller.
+**Card responses** carry `id, projectId, column, title, description, position, dueDate, assignedUserId, assignedUserName, size, priority, tags, createdBy, createdByName, updatedBy, updatedByName, attachmentCount, checklistDone, checklistTotal, following, createdAt, updatedAt`. `checklistDone` / `checklistTotal` are denormalized counts, so you get checklist progress without a second call; `following` is scoped to the authenticated caller. **`GET /projects/{id}/cards` omits `description`** (the board list is lean); fetch `GET /cards/{id}` or `/detail` when you need the body. Search hits return a ≤180-character `description` snippet.
 
 **Project responses** include `myRole`, `myBoardRole`, `visibility`, `canUploadAttachments` (reflects the **board's workspace plan**, not the caller's), plus `isFavorite`, `publicToken` (non-empty only while sharing is on), `backgroundImage` / `backgroundColor` (mutually exclusive), `colorScheme`, `textColor`, `totalCards`, `columnCounts`, `workspaceName`, `members` and `columns`.
 
 Endpoints intentionally **not** exposed via token auth (session + CSRF only): `/auth/*`, `/api-keys`, `/billing/*`, `/admin/*`, `/me/avatar` upload+delete, `/me/newsletter`, `/workspace`, `/support`.
+
+## Archive and restore (documented 2026-09-28)
+
+- `POST /cards/{id}/archive` hides a card from the board without deleting it
+  → `{"archived": true, "id": "..."}`. `404` if it is already archived.
+- `POST /cards/{id}/restore` un-archives it → the full card (same shape as
+  `GET /cards/{id}`), back in the column and position it was archived from.
+  `404` if the card is not archived.
+- `GET /projects/{id}/cards/archived` lists archived cards, most recently
+  archived first, capped at 200 (older ones stay reachable via search).
+- `POST /columns/{id}/archive` archives every live card in a column marked
+  `isDone` and returns `{"archived": <count>, "ids": [...]}`; the `ids` let
+  you undo by restoring each one.
+- Realtime / webhook events: `card.archived` (payload `{id, column}`, same as
+  `card.deleted`) and `card.restored` (payload = full card).
+
+## Integrations: webhooks and email-to-card (Pro, board admin)
+
+Both are gated the same way, checked in this order: board not visible →
+`404`; visible but caller isn't a board admin → `403 requires board admin`;
+Free workspace → `402` with `limit: "integrations"`. `DELETE` skips the plan
+check so a downgraded workspace can still clean up.
+
+**Outbound webhooks.** Subscription shape:
+`{id, endpointId, url, secret, description, format, events, active, createdAt, recentDeliveries: [{event, status, statusCode, attempts, error, createdAt}]}`.
+
+- `format`: `craaft` (default, signed JSON envelope `{event, occurredAt, projectId, data}`),
+  `slack` or `discord` (a chat message POSTed to their incoming-webhook URL,
+  **unsigned** - those services authenticate by the secret URL itself).
+- `events`: filter of names from `eventCatalogue`; omitted or `[]` = all.
+  Unknown names, unknown formats and bad URLs are `400`.
+- Event catalogue (2026-09-28): `card.created`, `card.updated`,
+  `card.deleted`, `card.archived`, `card.restored`,
+  `card.comment.{created,updated,deleted}`,
+  `card.checklist.item.{created,updated,deleted}`,
+  `column.{created,updated,deleted}`.
+- `craaft` deliveries carry `X-Craaft-Signature: t=<unix>,v1=<hex>` where
+  `v1 = HEX(HMAC-SHA256(secret, "<t>." + raw_body))`. Verify against the raw
+  bytes, never re-serialised JSON.
+- URL must be absolute `http(s)`; private / loopback / link-local targets are
+  rejected (and re-checked at delivery), so `localhost` receivers won't work.
+- Delivery is best-effort: up to 3 attempts with backoff, then logged in
+  `recentDeliveries`. No replay endpoint.
+
+**Email-to-card.** One intake address per board. Address shape:
+`{email, token, targetColumn, active, createdAt}` where `email` is
+`<token>@<deployment inbound domain>`. Mail becomes a card (subject → title,
+body → description) only when the sender is a workspace member and SPF + DKIM
+pass; everything else is dropped silently. `targetColumn` is a column **key**;
+`""` on PATCH clears it (first column), and a key that no longer exists also
+falls back to the first column. `rotate: true` mints a new token - the old
+address stops accepting mail immediately.
 
 ## Bulk card operations (since 2026-07-18)
 
@@ -212,7 +277,7 @@ Shared rules:
 
 19. **`GET /projects/{id}/events` is the realtime SSE stream, not a board activity log.** It opens a long-lived `text/event-stream` that never completes, so a normal request/response client will hang on it. Per-card history is **`GET /cards/{id}/events`** - a plain JSON array, oldest-first. The two are unrelated despite the matching path segment.
 
-20. **To read one card, use `GET /cards/{id}`.** Don't fetch `/projects/{id}/cards` and filter client-side. `404` when it doesn't exist or you have no board access, same as everywhere.
+20. **To read one card, use `GET /cards/{id}`.** Don't fetch `/projects/{id}/cards` and filter client-side - that list omits `description`. For the modal envelope (card + comments + events + checklist + attachments) use **`GET /cards/{id}/detail`**. `404` when it doesn't exist or you have no board access, same as everywhere.
 
 21. **`tags` on PATCH replaces the whole set.** It isn't a merge: send the full array you want, or `[]` to clear. Max 12 tags per card, 32 chars each.
 
@@ -221,6 +286,20 @@ Shared rules:
 23. **`POST /projects/{id}/cards/rebalance` is not an import tool.** It renumbers cards already on the board onto one column as 1, 2, 3, … in request order, for when a drop can't find a representable midpoint. Every id must already be on that board (`404` otherwise). To create cards, use the bulk create endpoint.
 
 24. **Comment bodies cap at 5000 characters.** Longer bodies are rejected, so split or truncate before sending.
+
+25. **`POST /invitations` returns a wrapper, not an Invitation.** The body is `{"invitation": {...}, "consumed": bool}` - read `.invitation.id`, not `.id`. `consumed: true` means the email already belonged to a verified account, which was added to the workspace on the spot (no accept link needed). `GET /invitations` still returns bare Invitation objects.
+
+26. **Archive is not delete, and restore puts the card back where it was.** `POST /cards/{id}/restore` returns it to its original column and position - don't follow it with a PATCH to "put it back". Archived cards vanish from `GET /projects/{id}/cards`; list them with `GET /projects/{id}/cards/archived`. To undo a column sweep, restore each id from the `POST /columns/{id}/archive` response.
+
+27. **`POST /columns/{id}/archive` only works on a done column.** On a column without `isDone` it succeeds with `{"archived": 0, "ids": []}` rather than erroring - check the count. To archive arbitrary cards, archive them one by one.
+
+28. **The webhook `{id}` is the subscription id.** `PATCH` / `DELETE /webhooks/{id}` take the `id` field from the list or create response, never `endpointId`.
+
+29. **`PATCH /webhooks/{id}` needs Pro; `DELETE` doesn't.** On a downgraded (Free) workspace you can't pause a webhook with `{"active": false}` (402) - delete it instead. Same split for `/projects/{id}/inbound-email`.
+
+30. **Webhook `secret` is returned on every read.** It isn't redacted after creation, so treat list / create / update responses as sensitive: don't print or log them whole. Only `craaft`-format deliveries are signed; a Slack / Discord receiver has nothing to verify.
+
+31. **Templated boards don't have `todo` / `doing` / `done`.** Only the default `kanban` template seeds those keys. After `POST /projects` with a `template`, `GET /projects/{id}` and read `columns[].key` before creating cards. The create response carries no `columns` at all, and `/board-templates` doesn't expose keys. An unknown template key is `400 unknown board template`.
 
 ## Common workflows
 
@@ -353,6 +432,72 @@ curl -s -H "Authorization: Bearer $TOKEN" \
      "$HOST/api/v1/projects/$PROJECT_ID/export?format=csv"
 ```
 
+### Create a board from a template
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" "$HOST/api/v1/board-templates" | jq -r '.[].key'
+
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"name":"Q4 bugs","template":"bug-tracker"}' \
+     "$HOST/api/v1/projects" | jq -r '.id' > /tmp/pid
+
+# The create response has no columns; fetch the board for its column keys.
+curl -s -H "Authorization: Bearer $TOKEN" "$HOST/api/v1/projects/$(cat /tmp/pid)" \
+     | jq '.columns[] | {key, title}'
+```
+
+### Archive, list archived, restore
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" "$HOST/api/v1/cards/$CARD_ID/archive"
+
+curl -s -H "Authorization: Bearer $TOKEN" \
+     "$HOST/api/v1/projects/$PROJECT_ID/cards/archived" | jq '.[] | {id, title, archivedAt}'
+
+curl -s -X POST -H "Authorization: Bearer $TOKEN" "$HOST/api/v1/cards/$CARD_ID/restore"
+```
+
+### Invite a teammate (response is a wrapper)
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"email":"sam@example.com","role":"member"}' \
+     "$HOST/api/v1/invitations" | jq '{id: .invitation.id, consumed}'
+```
+
+### Add a Slack webhook for card moves and new cards
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"url":"https://hooks.slack.com/services/T000/B000/XXXX","format":"slack","description":"#eng board feed","events":["card.created","card.updated"]}' \
+     "$HOST/api/v1/projects/$PROJECT_ID/webhooks" | jq '{id, format, events, active}'
+```
+
+Pause it later with `PATCH /webhooks/<id>` and `{"active":false}`.
+
+### Verify a `craaft`-format delivery (receiver side)
+
+```python
+import hashlib, hmac
+
+def verify(secret: str, raw_body: bytes, header: str) -> bool:
+    parts = dict(p.split("=", 1) for p in header.split(","))
+    mac = hmac.new(secret.encode(), f"{parts['t']}.".encode() + raw_body, hashlib.sha256)
+    return hmac.compare_digest(mac.hexdigest(), parts["v1"])
+```
+
+### Turn on email-to-card
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"targetColumn":"todo"}' \
+     "$HOST/api/v1/projects/$PROJECT_ID/inbound-email" | jq -r '.email'
+```
+
 ### Focus snapshot
 
 ```bash
@@ -371,12 +516,14 @@ can still be reached with a raw request.
 
 | Client | Install | Notes |
 |---|---|---|
-| Python | `pip install craaft` (1.3+) | The most complete; example below |
+| Python | `pip install craaft` (1.3+) | Example below |
 | JavaScript / TypeScript | `craaft` (1.0) | `src/resources/*.ts`, same resource layout |
 | PHP | `composer require craaft/craaft` | Requires PHP 8.2+ and ext-curl |
-| MCP server | remote HTTP endpoint | Exposes the API as tools for agents |
+| MCP server | remote HTTP endpoint | Exposes the API as tools for agents (`get_card`, `get_card_detail`, …) |
 
-None of the three SDKs wraps `GET /cards/{id}` yet - call it directly.
+All three SDKs wrap the single-card read (`cards.get`) and the one-call card view `GET /cards/{id}/detail` (`cards.detail`: card + comments + events + checklist + attachments); the MCP server exposes them as `get_card` and `get_card_detail`. Avatar and public background-image bytes are `public.avatar` / `public.boardBackground` in all three SDKs.
+
+Audited against the OpenAPI spec on 2026-09-28: the SDKs and the MCP server cover the whole token-accessible surface, including board templates, card archive / restore / archived list, webhooks and email-to-card, and they unwrap the `POST /invitations` `{invitation, consumed}` response. The only operation none of them wraps is the SSE stream (`GET /projects/{id}/events`), which is not a request/response call. MCP tool names for the newer surface: `list_board_templates` (plus a `template` argument on `create_project`), `archive_card`, `restore_card`, `list_archived_cards`, `list_webhooks` / `create_webhook` / `update_webhook` / `delete_webhook`, and `get_inbound_email` / `enable_inbound_email` / `update_inbound_email` / `disable_inbound_email`. If a client you have installed predates that audit, fall back to a raw request.
 
 ### Python
 
