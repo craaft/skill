@@ -34,6 +34,8 @@ Scheme is case-insensitive (`Bearer` / `bearer` both work). The literal `cra_` p
 
 **Tokens are minted once, never recoverable.** The user creates one in Settings → API keys. Only sha256(token) is stored. Never echo a full token back to the user; never log it; never embed it in shell history (use env vars or stdin).
 
+`cro_` OAuth access tokens (issued to MCP clients like Claude) behave exactly like `cra_` keys; they expire after an hour and are refreshed by the client.
+
 ## Error shapes
 
 All errors are `{"error": "<human readable>"}`. Status codes:
@@ -70,6 +72,11 @@ Highlights:
 |---|---|---|
 | GET | `/me` | Current user |
 | PATCH | `/me` | Partial update of name / email / username |
+| GET | `/me/notifications` | Inbox, newest first. Query: `before` (RFC3339Nano cursor), `limit` (default 30, max 50), `unread=1`. Returns `{items, nextBefore}`, NOT a bare array - see pitfall 32 |
+| GET | `/me/notifications/count` | Unseen count → `{unseen}` |
+| POST | `/me/notifications/seen` | Mark seen up to a point in time `{upTo}` → `{unseen}` |
+| POST | `/me/notifications/read` | Mark specific ids and/or a whole card's read `{ids?, cardId?}` → `{unseen}` |
+| POST | `/me/notifications/read-all` | Mark everything read, no body → `{unseen}` |
 | GET | `/projects` | List your projects |
 | POST | `/projects` | Create (`name`, `description?`, `template?` - a key from `/board-templates`; omitted = `kanban`) |
 | GET | `/board-templates` | Template catalogue: `[{key, name, description, columns: [{title, color, isDone}]}]` |
@@ -104,7 +111,7 @@ Highlights:
 | DELETE | `/cards/{id}` | Delete |
 | POST | `/cards/{id}/move` | Move card to another board (`targetProjectId`, `column`) |
 | POST | `/cards/bulk/move` | Sweep/move up to 100 cards (`ids`, `column`, optional `targetProjectId`) |
-| GET | `/cards/{id}/events` | Activity log (moves, priority, assignee), oldest-first |
+| GET | `/cards/{id}/events` | Activity log, oldest-first: `moved` (column change), `moved_board` (to another board: values are `<project id>:<column key>`, `fromName`/`toName` are board names and `fromDetail`/`toDetail` column titles, omitted for boards you can't see), `priority`, `assignee`. Ignore types you don't recognise |
 | GET | `/cards/{id}/comments` | List, oldest-first |
 | POST | `/cards/{id}/comments` | Add comment (`body`, max 5000 chars) |
 | POST | `/cards/{id}/follow` | Follow a card. Idempotent, `204`, no body |
@@ -300,6 +307,10 @@ Shared rules:
 30. **Webhook `secret` is returned on every read.** It isn't redacted after creation, so treat list / create / update responses as sensitive: don't print or log them whole. Only `craaft`-format deliveries are signed; a Slack / Discord receiver has nothing to verify.
 
 31. **Templated boards don't have `todo` / `doing` / `done`.** Only the default `kanban` template seeds those keys. After `POST /projects` with a `template`, `GET /projects/{id}` and read `columns[].key` before creating cards. The create response carries no `columns` at all, and `/board-templates` doesn't expose keys. An unknown template key is `400 unknown board template`.
+
+32. **`GET /me/notifications` returns an envelope, not an array.** `{"items": [...], "nextBefore": "<RFC3339Nano>" | null}`. Grouping - unread comment/moved/updated notifications on the same card merge into one row - means a page can hold fewer than `limit` items even when older rows exist, so the last item's `createdAt` isn't a usable cursor. Pass `nextBefore` back as `?before=` for the next page; `null` means nothing older to fetch.
+
+33. **`POST /me/notifications/seen` takes `upTo` (the newest `createdAt` you displayed), not ids; marking seen stops the email, marking read is separate.**
 
 ## Common workflows
 
