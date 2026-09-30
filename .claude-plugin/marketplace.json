@@ -1,0 +1,16 @@
+{
+  "name": "craaft",
+  "description": "The official craaft plugin for Claude Code: task management for AI and humans.",
+  "owner": {
+    "name": "craaft",
+    "url": "https://craaft.io"
+  },
+  "plugins": [
+    {
+      "name": "craaft",
+      "source": "./plugins/craaft",
+      "description": "Put your agent on your craaft board: the craaft MCP server plus a skill that teaches the craaft API.",
+      "version": "1.0.0"
+    }
+  ]
+}

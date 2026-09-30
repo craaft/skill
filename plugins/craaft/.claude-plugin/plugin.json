@@ -1,0 +1,13 @@
+{
+  "name": "craaft",
+  "version": "1.0.0",
+  "displayName": "craaft",
+  "description": "Put your agent on your craaft board. Adds the craaft MCP server (read boards, add and move cards, search) and the craaft-api skill for scripting against the REST API. Needs CRAAFT_API_TOKEN set to a personal access token.",
+  "author": {
+    "name": "craaft",
+    "url": "https://craaft.io"
+  },
+  "homepage": "https://craaft.io/mcp",
+  "repository": "https://github.com/craaft/skill",
+  "license": "MIT"
+}

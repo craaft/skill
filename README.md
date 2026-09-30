@@ -4,11 +4,27 @@ A [Claude Code Skill](https://docs.claude.com/en/docs/claude-code/skills) that t
 
 ## Install
 
+### Claude Code plugin (recommended)
+
+The `craaft` plugin bundles this skill and the craaft MCP server, so your agent can read boards, add and move cards, and search, as well as script against the REST API. Set your token first (mint one in craaft, Settings, then API keys; it is shown once):
+
+```bash
+export CRAAFT_API_TOKEN=cra_...
+claude plugin marketplace add craaft/skill
+claude plugin install craaft@craaft
+```
+
+Or from inside Claude Code: `/plugin marketplace add craaft/skill`, then `/plugin install craaft@craaft`.
+
+The MCP server reads `CRAAFT_API_TOKEN` from your environment (Claude Code 2.1.238 or later), so the token never goes into a config file. Updates arrive through `/plugin`; turn on auto-update for the marketplace there, or run `claude plugin update craaft@craaft`.
+
+### Skill only
+
 One-liner - installs into your user-level Claude Code skills directory:
 
 ```bash
 mkdir -p ~/.claude/skills/craaft-api && \
-  curl -fsSL https://raw.githubusercontent.com/craaft/skill/main/SKILL.md \
+  curl -fsSL https://raw.githubusercontent.com/craaft/skill/main/plugins/craaft/skills/craaft-api/SKILL.md \
     -o ~/.claude/skills/craaft-api/SKILL.md
 ```
 
@@ -16,8 +32,19 @@ Or, to scope it to a single project, run from that project's root:
 
 ```bash
 mkdir -p .claude/skills/craaft-api && \
-  curl -fsSL https://raw.githubusercontent.com/craaft/skill/main/SKILL.md \
+  curl -fsSL https://raw.githubusercontent.com/craaft/skill/main/plugins/craaft/skills/craaft-api/SKILL.md \
     -o .claude/skills/craaft-api/SKILL.md
+```
+
+The skill used to live at the repo root; installs made from the old `main/SKILL.md` URL should re-run the command above.
+
+## Layout
+
+```
+.claude-plugin/marketplace.json            # this repo is a plugin marketplace named "craaft"
+plugins/craaft/.claude-plugin/plugin.json  # the "craaft" plugin
+plugins/craaft/.mcp.json                   # craaft MCP server, bearer token from $CRAAFT_API_TOKEN
+plugins/craaft/skills/craaft-api/SKILL.md  # the skill
 ```
 
 ## What it does
@@ -41,7 +68,7 @@ export CRAAFT_API_TOKEN=cra_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 (`CRAAFT_TOKEN` also works in curl examples; the Python SDK reads `CRAAFT_API_TOKEN`.)
 
-To update later, re-run the same `curl`. To remove, delete the `craaft-api` directory.
+To update a skill-only install, re-run the same `curl`; to remove it, delete the `craaft-api` directory. Plugin installs update and uninstall through `/plugin`.
 
 ## Token hygiene
 
