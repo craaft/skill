@@ -146,9 +146,9 @@ Highlights:
 | POST | `/projects/{id}/webhooks` | Create `{url, description?, format?, events?}` → 201 subscription. Board admin, Pro |
 | PATCH | `/webhooks/{id}` | Partial update `{url?, description?, format?, events?, active?}`. `{id}` is the subscription id. Board admin, Pro |
 | DELETE | `/webhooks/{id}` | `204`. Board admin, **not** plan-gated |
-| GET | `/projects/{id}/inbound-email` | `{enabled: false, address: null}` or `{enabled: true, address}`. Board admin, Pro |
-| POST | `/projects/{id}/inbound-email` | Enable email-to-card `{targetColumn?}` → 201 address; 409 if already enabled. Board admin, Pro |
-| PATCH | `/projects/{id}/inbound-email` | `{active?, targetColumn?, rotate?}` → address. Board admin, Pro |
+| GET | `/projects/{id}/inbound-email` | `{enabled, address, aiAvailable}`; `address` is null when not set up. Board admin, Pro |
+| POST | `/projects/{id}/inbound-email` | Enable email-to-card `{targetColumn?, aiEnrich?}` → 201 address; 409 if already enabled. Board admin, Pro |
+| PATCH | `/projects/{id}/inbound-email` | `{active?, targetColumn?, rotate?, aiEnrich?}` → address. Board admin, Pro |
 | DELETE | `/projects/{id}/inbound-email` | `204`. Board admin, **not** plan-gated |
 
 These four need no `Authorization` header at all:
@@ -212,13 +212,18 @@ check so a downgraded workspace can still clean up.
   `recentDeliveries`. No replay endpoint.
 
 **Email-to-card.** One intake address per board. Address shape:
-`{email, token, targetColumn, active, createdAt}` where `email` is
+`{email, token, targetColumn, active, aiEnrich, createdAt}` where `email` is
 `<token>@<deployment inbound domain>`. Mail becomes a card (subject → title,
 body → description) only when the sender is a workspace member and SPF + DKIM
 pass; everything else is dropped silently. `targetColumn` is a column **key**;
 `""` on PATCH clears it (first column), and a key that no longer exists also
 falls back to the first column. `rotate: true` mints a new token - the old
-address stops accepting mail immediately.
+address stops accepting mail immediately. `aiEnrich: true` has threads
+(forwarded history, or bodies over 20,000 characters) written up as cards by an
+AI model: an action title, a summary, settled facts, open questions, and the
+asks as checklist items, with the original attached as `email.eml`.
+`409 AI is not configured on this server` when `aiAvailable` is false; turning
+it off always works.
 
 ## Bulk card operations (since 2026-07-18)
 
@@ -534,7 +539,7 @@ can still be reached with a raw request.
 
 All three SDKs wrap the single-card read (`cards.get`) and the one-call card view `GET /cards/{id}/detail` (`cards.detail`: card + comments + events + checklist + attachments); the MCP server exposes them as `get_card` and `get_card_detail`. Avatar and public background-image bytes are `public.avatar` / `public.boardBackground` in all three SDKs.
 
-Audited against the OpenAPI spec on 2026-09-28: the SDKs and the MCP server cover the whole token-accessible surface, including board templates, card archive / restore / archived list, webhooks and email-to-card, and they unwrap the `POST /invitations` `{invitation, consumed}` response. The only operation none of them wraps is the SSE stream (`GET /projects/{id}/events`), which is not a request/response call. MCP tool names for the newer surface: `list_board_templates` (plus a `template` argument on `create_project`), `archive_card`, `restore_card`, `list_archived_cards`, `list_webhooks` / `create_webhook` / `update_webhook` / `delete_webhook`, and `get_inbound_email` / `enable_inbound_email` / `update_inbound_email` / `disable_inbound_email`. If a client you have installed predates that audit, fall back to a raw request.
+Audited against the OpenAPI spec on 2026-09-28: the SDKs and the MCP server cover the whole token-accessible surface, including board templates, card archive / restore / archived list, webhooks and email-to-card, and they unwrap the `POST /invitations` `{invitation, consumed}` response. The only operation none of them wraps is the SSE stream (`GET /projects/{id}/events`), which is not a request/response call. MCP tool names for the newer surface: `list_board_templates` (plus a `template` argument on `create_project`), `archive_card`, `restore_card`, `list_archived_cards`, `list_webhooks` / `create_webhook` / `update_webhook` / `delete_webhook`, and `get_inbound_email` / `enable_inbound_email` / `update_inbound_email` / `disable_inbound_email` (`enable_inbound_email` and `update_inbound_email` take `ai_enrich`; `get_inbound_email` returns `ai_available`). If a client you have installed predates that audit, fall back to a raw request.
 
 ### Python
 
