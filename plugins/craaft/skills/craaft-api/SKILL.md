@@ -208,13 +208,19 @@ check so a downgraded workspace can still clean up.
   bytes, never re-serialised JSON.
 - URL must be absolute `http(s)`; private / loopback / link-local targets are
   rejected (and re-checked at delivery), so `localhost` receivers won't work.
-- Delivery is best-effort: up to 3 attempts with backoff, then logged in
-  `recentDeliveries`. No replay endpoint.
+- `craaft` deliveries are stored before sending and retried if the endpoint
+  is down: after about 1, 5, 15 and 30 minutes, and once more about 30
+  minutes later; after an hour without success it is marked failed. A
+  delivery can occasionally arrive twice (for example after a restart
+  mid-delivery); use `event`, `occurredAt` and `data.id` to spot repeats.
+  Each attempt is freshly signed and `occurredAt` is the original time, so
+  sort by it: order isn't guaranteed across retries. `recentDeliveries` shows
+  one row per event with its attempt count. No replay endpoint.
 - `slack` / `discord` deliveries are grouped per card: held until the card
   has been quiet for a minute (at most 5 minutes), then one message
-  covering every change. `craaft` deliveries are never grouped: one POST per
-  event, immediately. A grouped delivery shows in `recentDeliveries` as its
-  first event plus a count, e.g. `card.created +10`.
+  covering every change. `craaft` deliveries are never grouped: one delivery
+  per event, attempted immediately. A grouped delivery shows in
+  `recentDeliveries` as its first event plus a count, e.g. `card.created +10`.
 
 **Email-to-card.** One intake address per board. Address shape:
 `{email, token, targetColumn, active, aiEnrich, createdAt}` where `email` is
