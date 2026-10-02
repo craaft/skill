@@ -210,6 +210,11 @@ check so a downgraded workspace can still clean up.
   rejected (and re-checked at delivery), so `localhost` receivers won't work.
 - Delivery is best-effort: up to 3 attempts with backoff, then logged in
   `recentDeliveries`. No replay endpoint.
+- `slack` / `discord` deliveries are grouped per card: held until the card
+  has been quiet for a minute (at most 5 minutes), then one message
+  covering every change. `craaft` deliveries are never grouped: one POST per
+  event, immediately. A grouped delivery shows in `recentDeliveries` as its
+  first event plus a count, e.g. `card.created +10`.
 
 **Email-to-card.** One intake address per board. Address shape:
 `{email, token, targetColumn, active, aiEnrich, createdAt}` where `email` is
