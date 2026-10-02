@@ -218,7 +218,9 @@ check so a downgraded workspace can still clean up.
   one row per event with its attempt count. No replay endpoint.
 - `slack` / `discord` deliveries are grouped per card: held until the card
   has been quiet for a minute (at most 5 minutes), then one message
-  covering every change. `craaft` deliveries are never grouped: one delivery
+  covering every change. A bulk request (bulk create / update / move,
+  column archive) is one message for the whole request; a column rebalance
+  sends none. `craaft` deliveries are never grouped: one delivery
   per event, attempted immediately. A grouped delivery shows in
   `recentDeliveries` as its first event plus a count, e.g. `card.created +10`.
 
@@ -247,7 +249,9 @@ Shared rules:
   batch; the error names the offending index: `{"error":"cards[3]: title is required"}`.
   Never assume a failed batch was partially applied - it wasn't.
 - **No notification emails** (mentions / moves / assignments stay
-  silent). Activity events and realtime SSE fire normally.
+  silent). Activity events and realtime SSE fire normally. Slack /
+  Discord webhooks get one message per request; `craaft` webhooks get one
+  delivery per card event.
 - Responses are `{"cards":[...]}` in request order (create returns 201,
   the others 200).
 - Bulk create items take **full metadata** (`dueDate`, `assignedUserId`,
