@@ -127,7 +127,6 @@ Highlights:
 | DELETE | `/milestones/{id}` | Delete; board-admin only |
 | GET | `/attachments/{id}` | Download attachment bytes |
 | DELETE | `/attachments/{id}` | Delete attachment |
-| GET | `/cards/upcoming` | Cross-project due-dated cards |
 | GET | `/cards/focus` | Focus envelope: `due` / `attention` / `hygiene` counts |
 | GET | `/cards/hygiene?type=ghosts\|stuck\|mine_no_date` | Hygiene drill-down |
 | PATCH | `/comments/{id}` | Edit (author only) |
