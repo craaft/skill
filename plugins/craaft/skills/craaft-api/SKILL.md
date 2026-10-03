@@ -81,7 +81,7 @@ Highlights:
 | POST | `/projects` | Create (`name`, `description?`, `template?` - a key from `/board-templates`; omitted = `kanban`) |
 | GET | `/board-templates` | Template catalogue: `[{key, name, description, columns: [{title, color, isDone}]}]` |
 | GET | `/projects/{id}` | Single project + columns + counts |
-| PATCH | `/projects/{id}` | Partial update (incl. `visibility`, `backgroundColor`) |
+| PATCH | `/projects/{id}` | Partial update (incl. `visibility`, `backgroundColor`, `showMilestones`, `showArchived`) |
 | DELETE | `/projects/{id}` | Cascading delete |
 | GET | `/projects/{id}/export?format=json\|csv` | Export the board (project, columns, cards, comments, attachment metadata). Defaults to JSON |
 | POST | `/projects/{id}/share` | Enable public read-only sharing → `{publicToken}` |
@@ -164,7 +164,7 @@ These four need no `Authorization` header at all:
 
 **Card responses** carry `id, projectId, column, title, description, position, dueDate, assignedUserId, assignedUserName, size, priority, tags, createdBy, createdByName, updatedBy, updatedByName, attachmentCount, checklistDone, checklistTotal, following, createdAt, updatedAt`. `checklistDone` / `checklistTotal` are denormalized counts, so you get checklist progress without a second call; `following` is scoped to the authenticated caller. **`GET /projects/{id}/cards` omits `description`** (the board list is lean); fetch `GET /cards/{id}` or `/detail` when you need the body. Search hits return a ≤180-character `description` snippet.
 
-**Project responses** include `myRole`, `myBoardRole`, `visibility`, `canUploadAttachments` (reflects the **board's workspace plan**, not the caller's), plus `isFavorite`, `publicToken` (non-empty only while sharing is on), `backgroundImage` / `backgroundColor` (mutually exclusive), `colorScheme`, `textColor`, `totalCards`, `columnCounts`, `workspaceName`, `members` and `columns`.
+**Project responses** include `myRole`, `myBoardRole`, `visibility`, `canUploadAttachments` (reflects the **board's workspace plan**, not the caller's), plus `isFavorite`, `publicToken` (non-empty only while sharing is on), `backgroundImage` / `backgroundColor` (mutually exclusive), `colorScheme`, `textColor`, `showMilestones` / `showArchived` (whether the board's top bar shows those buttons; board admins toggle them, the data is unaffected), `totalCards`, `columnCounts`, `workspaceName`, `members` and `columns`.
 
 Endpoints intentionally **not** exposed via token auth (session + CSRF only): `/auth/*`, `/api-keys`, `/billing/*`, `/admin/*`, `/me/avatar` upload+delete, `/me/newsletter`, `/workspace`, `/support`.
 
