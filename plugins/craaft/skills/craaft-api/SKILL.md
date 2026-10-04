@@ -170,6 +170,8 @@ These four need no `Authorization` header at all:
 
 Endpoints intentionally **not** exposed via token auth (session + CSRF only): `/auth/*`, `/api-keys`, `/billing/*`, `/admin/*`, `/me/avatar` upload+delete, `/me/newsletter`, `/workspace`, `/support`.
 
+Two-factor sign-in doesn't affect API keys: a `cra_*` bearer token works as before. The `/me/2fa*` routes are session-only, so a token gets 403.
+
 ## Archive and restore (documented 2026-09-28)
 
 - `POST /cards/{id}/archive` hides a card from the board without deleting it
