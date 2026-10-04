@@ -79,11 +79,13 @@ Highlights:
 | POST | `/me/notifications/read-all` | Mark everything read, no body → `{unseen}` |
 | GET | `/projects` | List your projects |
 | POST | `/projects` | Create (`name`, `description?`, `template?` - a key from `/board-templates`; omitted = `kanban`) |
+| POST | `/imports/preview` | Dry run of a board import. `multipart/form-data`: `file` (Trello JSON, CSV or craaft JSON export, max 5 MB), `source?` (`trello`, `csv`, `jira`, `asana`, `craaft`; detected when omitted), `mapping?` (CSV only, JSON of craaft field to header; replaces the suggested mapping), `name?`. Returns what would be created: columns with card counts, totals, assignee matches, `access` (matched assignees, other than you and workspace owners/admins, who become contributors on the new private board), warnings, and for CSV the headers, suggested mapping and sample rows. A CSV with no guessable title header and no `mapping` still gets `200` with the headers and an empty summary: map `title` and preview again. Writes nothing |
+| POST | `/imports` | Import the same file into a NEW private board (never an existing one). Same fields as the preview. `201` with the project, shaped like `POST /projects`. All or nothing, no notifications; adds the preview's `access` people as contributors; a craaft export keeps its description. `400` CSV with no `title` mapping or over 200 headers, `402` board cap, `413` over 5 MB, `422` over a limit (2,000 cards, 200 columns, 500 checklist items on a card, 20,000 checklist items or comments in all; the message gives the numbers), `503` + `Retry-After: 5` when 2 imports are already running |
 | GET | `/board-templates` | Template catalogue: `[{key, name, description, columns: [{title, color, isDone}]}]` |
 | GET | `/projects/{id}` | Single project + columns + counts |
 | PATCH | `/projects/{id}` | Partial update (incl. `visibility`, `backgroundColor`, `showMilestones`, `showArchived`, `showFiles`) |
 | DELETE | `/projects/{id}` | Cascading delete |
-| GET | `/projects/{id}/export?format=json\|csv` | Export the board (project, columns, cards, comments, attachment metadata). Defaults to JSON |
+| GET | `/projects/{id}/export?format=json\|csv` | Export the board (project, columns, cards, comments, attachment metadata). Defaults to JSON. JSON is version 2: columns carry `isDone` and `cardLimit`, cards carry `checklist` (`[{text, done}]`) |
 | POST | `/projects/{id}/share` | Enable public read-only sharing → `{publicToken}` |
 | DELETE | `/projects/{id}/share` | Revoke sharing |
 | POST | `/projects/{id}/columns` | Add column (`title`) |
