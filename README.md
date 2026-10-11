@@ -6,17 +6,18 @@ A [Claude Code Skill](https://docs.claude.com/en/docs/claude-code/skills) that t
 
 ### Claude Code plugin (recommended)
 
-The `craaft` plugin bundles this skill and the craaft MCP server, so your agent can read boards, add and move cards, and search, as well as script against the REST API. Set your token first (mint one in craaft, Settings, then API keys; it is shown once):
+The `craaft` plugin bundles this skill and the craaft MCP server, so your agent can read boards, add and move cards, comment and search, as well as script against the REST API.
 
 ```bash
-export CRAAFT_API_TOKEN=cra_...
 claude plugin marketplace add craaft/skill
 claude plugin install craaft@craaft
 ```
 
 Or from inside Claude Code: `/plugin marketplace add craaft/skill`, then `/plugin install craaft@craaft`.
 
-The MCP server reads `CRAAFT_API_TOKEN` from your environment (Claude Code 2.1.238 or later), so the token never goes into a config file. Updates arrive through `/plugin`; turn on auto-update for the marketplace there, or run `claude plugin update craaft@craaft`.
+The first time Claude Code connects, run `/mcp`, pick `craaft` and sign in with your craaft account in the browser. There is no token to copy: the MCP server uses OAuth, and Claude Code keeps the session refreshed. Updates arrive through `/plugin`; turn on auto-update for the marketplace there, or run `claude plugin update craaft@craaft`.
+
+Version 1.0.0 of the plugin read a `CRAAFT_API_TOKEN` personal access token from your environment instead. You can unset it once you have signed in; the skill's curl and SDK examples still use one.
 
 ### Skill only
 
@@ -43,7 +44,7 @@ The skill used to live at the repo root; installs made from the old `main/SKILL.
 ```
 .claude-plugin/marketplace.json            # this repo is a plugin marketplace named "craaft"
 plugins/craaft/.claude-plugin/plugin.json  # the "craaft" plugin
-plugins/craaft/.mcp.json                   # craaft MCP server, bearer token from $CRAAFT_API_TOKEN
+plugins/craaft/.mcp.json                   # craaft MCP server at ai.craaft.io/mcp, OAuth sign-in
 plugins/craaft/skills/craaft-api/SKILL.md  # the skill
 ```
 
