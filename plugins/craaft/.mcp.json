@@ -2,10 +2,7 @@
   "mcpServers": {
     "craaft": {
       "type": "http",
-      "url": "https://ai.craaft.io/mcp",
-      "headers": {
-        "Authorization": "Bearer ${CRAAFT_API_TOKEN}"
-      }
+      "url": "https://ai.craaft.io/mcp"
     }
   }
 }
