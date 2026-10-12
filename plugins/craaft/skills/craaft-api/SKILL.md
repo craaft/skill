@@ -100,6 +100,7 @@ Highlights:
 | GET | `/projects/{id}/background-image` | Download the board background bytes |
 | DELETE | `/projects/{id}/background-image` | Remove the background. Board-admin only |
 | GET | `/projects/{id}/events` | **SSE stream** (realtime), NOT an activity log - see pitfall 19 |
+| GET | `/projects/{id}/activity` | Board activity feed, newest first: cards added / moved / archived / restored / deleted, priority, assignee, comments (`excerpt`), columns added / renamed / deleted. Query: `before` (the previous page's `nextBefore`, opaque), `limit` (default 50, max 100), `actor` (user id), `type` (comma-separated) → `{items, nextBefore}`. `cardId` only while the card is still on this board; deleted cards keep `cardTitle`. Kept 12 months |
 | GET | `/cards/{id}/attachments` | List attachments on a card |
 | POST | `/cards/{id}/attachments` | Upload file (`multipart/form-data`, field `file`, max 25 MiB; Pro workspace) |
 | PATCH | `/columns/{id}` | Update (title/color/position/isDone/cardLimit) |
@@ -306,7 +307,7 @@ Shared rules:
 
 18. **`POST /cards/bulk/move` ids must share a board unless `targetProjectId` is set.** Mixed-board ids without a target return 400. Cross-workspace targets return 404 (not 403) - same non-probing rule as everything else.
 
-19. **`GET /projects/{id}/events` is the realtime SSE stream, not a board activity log.** It opens a long-lived `text/event-stream` that never completes, so a normal request/response client will hang on it. Per-card history is **`GET /cards/{id}/events`** - a plain JSON array, oldest-first. The two are unrelated despite the matching path segment.
+19. **`GET /projects/{id}/events` is the realtime SSE stream, not a board activity log.** It opens a long-lived `text/event-stream` that never completes, so a normal request/response client will hang on it. Per-card history is **`GET /cards/{id}/events`** - a plain JSON array, oldest-first - and the whole board's history is **`GET /projects/{id}/activity`**, newest first and paged. Neither is related to the SSE stream despite the matching path segment.
 
 20. **To read one card, use `GET /cards/{id}`.** Don't fetch `/projects/{id}/cards` and filter client-side - that list omits `description`. For the modal envelope (card + comments + events + checklist + attachments) use **`GET /cards/{id}/detail`**. `404` when it doesn't exist or you have no board access, same as everywhere.
 
