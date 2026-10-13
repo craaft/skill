@@ -19,6 +19,6 @@ Check your text against VOICE.md before you hand it back.
 
 ## Working rules
 
-- Bump `version` in both manifests when you ship a change plugin users should pick up, and check them with `claude plugin validate .` and `claude plugin validate ./plugins/craaft`.
+- Bump `version` in both manifests when you ship a change plugin users should pick up, and check them with `claude plugin validate .`.
 - Don't commit, push or open pull requests unless the person you're working for asks you to.
 - Never add AI attribution (co-author lines, "generated with" footers) to commits, PRs, code comments or files.

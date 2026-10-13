@@ -25,7 +25,7 @@ One-liner - installs into your user-level Claude Code skills directory:
 
 ```bash
 mkdir -p ~/.claude/skills/craaft-api && \
-  curl -fsSL https://raw.githubusercontent.com/craaft/skill/main/plugins/craaft/skills/craaft-api/SKILL.md \
+  curl -fsSL https://raw.githubusercontent.com/craaft/skill/main/skills/craaft-api/SKILL.md \
     -o ~/.claude/skills/craaft-api/SKILL.md
 ```
 
@@ -33,20 +33,26 @@ Or, to scope it to a single project, run from that project's root:
 
 ```bash
 mkdir -p .claude/skills/craaft-api && \
-  curl -fsSL https://raw.githubusercontent.com/craaft/skill/main/plugins/craaft/skills/craaft-api/SKILL.md \
+  curl -fsSL https://raw.githubusercontent.com/craaft/skill/main/skills/craaft-api/SKILL.md \
     -o .claude/skills/craaft-api/SKILL.md
 ```
 
-The skill used to live at the repo root; installs made from the old `main/SKILL.md` URL should re-run the command above.
+The skill has moved twice, from `main/SKILL.md` and then from `main/plugins/craaft/skills/craaft-api/SKILL.md`. Installs made from either old URL should re-run the command above.
 
 ## Layout
 
+The repo root is the plugin, so directories that scan a repo for plugin files (such as cursor.directory) find them at the top level.
+
 ```
-.claude-plugin/marketplace.json            # this repo is a plugin marketplace named "craaft"
-plugins/craaft/.claude-plugin/plugin.json  # the "craaft" plugin
-plugins/craaft/.mcp.json                   # craaft MCP server at ai.craaft.io/mcp, OAuth sign-in
-plugins/craaft/skills/craaft-api/SKILL.md  # the skill
+.claude-plugin/marketplace.json   # this repo is a plugin marketplace named "craaft", whose 1 plugin is the repo root
+.claude-plugin/plugin.json        # the "craaft" plugin
+.mcp.json                         # craaft MCP server at ai.craaft.io/mcp, OAuth sign-in
+skills/craaft-api/SKILL.md        # the skill
 ```
+
+## What it sends where
+
+The plugin runs no local code. It connects to 1 server, `https://ai.craaft.io/mcp`, run by craaft, which calls the craaft API at `https://craaft.io/api/v1` on your behalf. Board data you ask Claude to read or change goes between Claude Code and craaft only. The skill is documentation: it runs nothing itself, and the API calls Claude writes from it go to `https://craaft.io/api/v1` with a personal access token you supply.
 
 ## What it does
 
