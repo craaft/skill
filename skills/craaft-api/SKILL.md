@@ -339,6 +339,10 @@ Shared rules:
 
 34. **List mentions with `GET /me/notifications?kind=mention`; don't page the whole inbox and filter.** The filter runs before `limit`, so pages stay full. Each row's `card` has `id`, `projectId` and `projectName`; `details[0]` is `"card"` (title or description) or `"comment"`, and a comment mention carries `commentId` (absent once the comment is deleted). The inbox keeps read rows for 90 days and unread ones for 180, so this lists recent mentions, not all of them. An unknown `kind`, including `group`, is `400`.
 
+35. **A read-only token gets `403` on anything but `GET`, `HEAD` and `OPTIONS`.** The error is `this token is read-only; this request needs a token with read and write access`. A personal access token is read-only when it was created with access `read`; an OAuth token is when its grant's scope is `craaft:read` (the token response's `scope` says which). Don't retry: ask the user for a read and write key, or to reconnect the app with read and write access.
+
+36. **A token limited to some boards treats every other board as missing.** A board, card or comment elsewhere is `404` (not `403`), and `GET /projects`, `/search`, `/cards/focus` and `/me/notifications` leave other boards out, so don't conclude a board was deleted. `POST /projects`, `/imports`, `/members` and `/invitations` answer `403 this token is limited to some boards; this request needs a token for all boards`. If the user expects a board you can't find, ask whether the token covers it.
+
 ## Common workflows
 
 ```bash
