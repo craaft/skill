@@ -72,7 +72,7 @@ Highlights:
 |---|---|---|
 | GET | `/me` | Current user |
 | PATCH | `/me` | Partial update of name / email / username |
-| GET | `/me/notifications` | Inbox, newest first. Query: `before` (RFC3339Nano cursor), `limit` (default 30, max 50), `unread=1`. Returns `{items, nextBefore}`, NOT a bare array - see pitfall 32 |
+| GET | `/me/notifications` | Inbox, newest first. Query: `before` (RFC3339Nano cursor), `limit` (default 30, max 50), `unread=1`, `kind` (`mention`, `assigned`, `comment`, `moved`, `updated`). Returns `{items, nextBefore}`, NOT a bare array - see pitfalls 32 and 34 |
 | GET | `/me/notifications/count` | Unseen count → `{unseen}` |
 | POST | `/me/notifications/seen` | Mark seen up to a point in time `{upTo}` → `{unseen}` |
 | POST | `/me/notifications/read` | Mark specific ids and/or a whole card's read `{ids?, cardId?}` → `{unseen}` |
@@ -336,6 +336,8 @@ Shared rules:
 32. **`GET /me/notifications` returns an envelope, not an array.** `{"items": [...], "nextBefore": "<RFC3339Nano>" | null}`. Grouping - unread comment/moved/updated notifications on the same card merge into one row - means a page can hold fewer than `limit` items even when older rows exist, so the last item's `createdAt` isn't a usable cursor. Pass `nextBefore` back as `?before=` for the next page; `null` means nothing older to fetch.
 
 33. **`POST /me/notifications/seen` takes `upTo` (the newest `createdAt` you displayed), not ids; marking seen stops the email, marking read is separate.**
+
+34. **List mentions with `GET /me/notifications?kind=mention`; don't page the whole inbox and filter.** The filter runs before `limit`, so pages stay full. Each row's `card` has `id`, `projectId` and `projectName`; `details[0]` is `"card"` (title or description) or `"comment"`, and a comment mention carries `commentId` (absent once the comment is deleted). The inbox keeps read rows for 90 days and unread ones for 180, so this lists recent mentions, not all of them. An unknown `kind`, including `group`, is `400`.
 
 ## Common workflows
 
