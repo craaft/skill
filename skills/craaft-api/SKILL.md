@@ -72,7 +72,7 @@ Highlights:
 |---|---|---|
 | GET | `/me` | Current user |
 | PATCH | `/me` | Partial update of name / email / username |
-| GET | `/me/notifications` | Inbox, newest first. Query: `before` (RFC3339Nano cursor), `limit` (default 30, max 50), `unread=1`, `kind` (`mention`, `assigned`, `comment`, `moved`, `updated`). Returns `{items, nextBefore}`, NOT a bare array - see pitfalls 32 and 34 |
+| GET | `/me/notifications` | Inbox, newest first. Query: `before` (RFC3339Nano cursor), `limit` (default 30, max 50), `unread=1`, `kind` (`mention`, `assigned`, `comment`, `moved`, `updated`, `due`). Returns `{items, nextBefore}`, NOT a bare array - see pitfalls 32 and 34 |
 | GET | `/me/notifications/count` | Unseen count → `{unseen}` |
 | POST | `/me/notifications/seen` | Mark seen up to a point in time `{upTo}` → `{unseen}` |
 | POST | `/me/notifications/read` | Mark specific ids and/or a whole card's read `{ids?, cardId?}` → `{unseen}` |
@@ -342,6 +342,8 @@ Shared rules:
 35. **A read-only token gets `403` on anything but `GET`, `HEAD` and `OPTIONS`.** The error is `this token is read-only; this request needs a token with read and write access`. A personal access token is read-only when it was created with access `read`; an OAuth token is when its grant's scope is `craaft:read` (the token response's `scope` says which). Don't retry: ask the user for a read and write key, or to reconnect the app with read and write access.
 
 36. **A token limited to some boards treats every other board as missing.** A board, card or comment elsewhere is `404` (not `403`), and `GET /projects`, `/search`, `/cards/focus` and `/me/notifications` leave other boards out, so don't conclude a board was deleted. `POST /projects`, `/imports`, `/members` and `/invitations` answer `403 this token is limited to some boards; this request needs a token for all boards`. If the user expects a board you can't find, ask whether the token covers it.
+
+37. **A `due` notification is a due date reminder and has no actor.** The assignee of an open card gets one the day before it is due (`details[0]` `"tomorrow"`) and one on the day (`"today"`), from 08:00 UTC, reading the due date as a UTC date. `actors` is empty, so don't read it as someone acting. `GET /me/notifications?kind=due` lists what's due soon.
 
 ## Common workflows
 
