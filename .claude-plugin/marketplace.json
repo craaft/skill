@@ -10,7 +10,7 @@
       "name": "craaft",
       "source": "./",
       "description": "Put your agent on your craaft board: the craaft MCP server plus a skill that teaches the craaft API.",
-      "version": "1.1.8"
+      "version": "1.1.9"
     }
   ]
 }

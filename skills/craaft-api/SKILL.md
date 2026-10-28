@@ -108,6 +108,7 @@ Highlights:
 | DELETE | `/columns/{id}` | 409 if it holds live cards; its archived cards move to the first remaining column |
 | GET | `/cards/{id}` | Fetch one card (same shape PATCH returns, including `following` and `description`) |
 | GET | `/cards/{id}/detail` | Card (with description) + comments + events (newest 100, oldest-first) + checklist + attachments |
+| GET | `/cards/{id}/prompt` | `{cardId, prompt}`: the card as a Markdown brief for an AI tool (title, board, column, metadata, link and ID, description, checklist, 10 newest comments, attachment names). Same text as Copy as prompt in the web app; MCP tool `get_card_prompt` |
 | POST | `/cards/{id}/archive` | Archive one card → `{archived: true, id}` |
 | POST | `/cards/{id}/restore` | Un-archive → full card, back in its original column + position |
 | PATCH | `/cards/{id}` | Update card metadata + same-board drag-drop |
