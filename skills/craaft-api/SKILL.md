@@ -154,6 +154,17 @@ Highlights:
 | POST | `/projects/{id}/inbound-email` | Enable email-to-card `{targetColumn?, aiEnrich?}` → 201 address; 409 if already enabled. Board admin, Pro |
 | PATCH | `/projects/{id}/inbound-email` | `{active?, targetColumn?, rotate?, aiEnrich?}` → address. Board admin, Pro |
 | DELETE | `/projects/{id}/inbound-email` | `204`. Board admin, **not** plan-gated |
+| GET | `/projects/{id}/github` | `{enabled, canConnect, installations, binding}`: whether the server has GitHub, the workspace's installs and the board's repository (`binding` null when not connected) |
+| PUT | `/projects/{id}/github` | Connect the board `{installationId, repoId, openColumn?, mergedColumn?}` (column keys; null = don't move). Board admin |
+| DELETE | `/projects/{id}/github` | Disconnect the board. Board admin |
+| GET | `/projects/{id}/github/repos` | Repos the workspace's installs can reach. Board admin |
+| GET | `/projects/{id}/github/pulls` | Pull requests on the board's live cards (each has `cardId`) |
+| GET | `/cards/{id}/github` | `{repo, pullRequests, branches}`; also in `/cards/{id}/detail` as `github` |
+| POST | `/cards/{id}/github/pulls` | Link a pull request `{url}` from the board's connected repository |
+| DELETE | `/cards/{id}/github/pulls/{linkId}` | Unlink a pull request |
+| POST | `/cards/{id}/github/branch` | Create branch `<short id>-<title slug>` from the default branch; `existed: true` if it was already there |
+
+**GitHub:** a pull request links to a card when its branch starts with the card's 4-character short id (`a82d-fix-search`), its title or body says `craaft #a82d`, or it contains the card id or link. Opening it (not as a draft) moves the card to the board's open column; merging moves it to the merged column. Installing the GitHub App happens in the web app (board settings > GitHub), not through the API.
 
 These four need no `Authorization` header at all:
 
