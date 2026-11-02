@@ -150,10 +150,12 @@ Highlights:
 | POST | `/projects/{id}/webhooks` | Create `{url, description?, format?, events?}` → 201 subscription. Board admin, Pro |
 | PATCH | `/webhooks/{id}` | Partial update `{url?, description?, format?, events?, active?}`. `{id}` is the subscription id. Board admin, Pro |
 | DELETE | `/webhooks/{id}` | `204`. Board admin, **not** plan-gated |
-| GET | `/projects/{id}/inbound-email` | `{enabled, address, aiAvailable}`; `address` is null when not set up. Board admin, Pro |
+| GET | `/projects/{id}/inbound-email` | `{enabled, address, aiAvailable, aiUsage}`, plus `senders` and `turnedAway` when enabled; `address` is null when not set up. Board admin, Pro |
 | POST | `/projects/{id}/inbound-email` | Enable email-to-card `{targetColumn?, aiEnrich?}` → 201 address; 409 if already enabled. Board admin, Pro |
-| PATCH | `/projects/{id}/inbound-email` | `{active?, targetColumn?, rotate?, aiEnrich?}` → address. Board admin, Pro |
+| PATCH | `/projects/{id}/inbound-email` | `{active?, targetColumn?, rotate?, aiEnrich?, aiAlways?, aiInstructions?}` → address. Board admin, Pro |
 | DELETE | `/projects/{id}/inbound-email` | `204`. Board admin, **not** plan-gated |
+| POST | `/projects/{id}/inbound-email/senders` | Allow a sender `{pattern}` (`a@x.com` or `@x.com`) → 201 sender; 400 invalid / free-mail domain / 50 already; 409 already allowed. Board admin, Pro |
+| DELETE | `/projects/{id}/inbound-email/senders/{senderId}` | `204`. Board admin, **not** plan-gated |
 | GET | `/projects/{id}/github` | `{enabled, canConnect, installations, binding}`: whether the server has GitHub, the workspace's installs and the board's repository (`binding` null when not connected) |
 | PUT | `/projects/{id}/github` | Connect the board `{installationId, repoId, openColumn?, mergedColumn?}` (column keys; null = don't move). Workspace owner/admin |
 | DELETE | `/projects/{id}/github` | Disconnect the board. Workspace owner/admin |
@@ -242,10 +244,19 @@ check so a downgraded workspace can still clean up.
   `recentDeliveries` as its first event plus a count, e.g. `card.created +10`.
 
 **Email-to-card.** One intake address per board. Address shape:
-`{email, token, targetColumn, active, aiEnrich, createdAt}` where `email` is
+`{email, token, targetColumn, active, aiEnrich, aiAlways, aiInstructions, createdAt}` where `email` is
 `<token>@<deployment inbound domain>`. Mail becomes a card (subject → title,
-body → description) only when the sender is a workspace member and SPF + DKIM
-pass; everything else is dropped silently. `targetColumn` is a column **key**;
+body → description) only when SPF, DKIM and DMARC pass and the sender is
+either a member who can open the board (the card is theirs) or on the board's
+allowed senders (`{id, pattern, addedBy, needsOwner, createdAt}`, an exact
+address or `@domain`; the card is created as `addedBy` and starts "Emailed by
+<sender>"). Everything else is dropped silently and listed in `turnedAway`
+for 7 days. A Gmail filter forward keeps the original sender in From, so allow
+that sender; Gmail's own forwarding confirmation becomes a card with its code,
+created as whoever turned on the address. Allowed senders are capped at 200
+cards a day per board, and whole free-mail domains (`@gmail.com`) can't be
+allowed. `needsOwner: true` means `addedBy` was deleted or lost board access:
+remove the sender and add it again. `targetColumn` is a column **key**;
 `""` on PATCH clears it (first column), and a key that no longer exists also
 falls back to the first column. `rotate: true` mints a new token - the old
 address stops accepting mail immediately. `aiEnrich: true` has threads
@@ -253,7 +264,9 @@ address stops accepting mail immediately. `aiEnrich: true` has threads
 AI model: an action title, a summary, settled facts, open questions, and the
 asks as checklist items, with the original attached as `email.eml`.
 `409 AI is not configured on this server` when `aiAvailable` is false; turning
-it off always works.
+it off always works. `aiAlways: true` writes every email up with AI, each using
+1 of the workspace's monthly AI cards. `aiInstructions` (up to 1,000
+characters, `""` clears) go to the model after craaft's own rules.
 
 ## Bulk card operations (since 2026-07-18)
 
