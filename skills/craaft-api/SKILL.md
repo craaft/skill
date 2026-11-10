@@ -83,7 +83,7 @@ Highlights:
 | POST | `/imports` | Import the same file into a NEW private board (never an existing one). Same fields as the preview. `201` with the project, shaped like `POST /projects`. All or nothing, no notifications; adds the preview's `access` people as contributors; a craaft export keeps its description. `400` CSV with no `title` mapping or over 200 headers, `402` board cap, `413` over 5 MB, `422` over a limit (2,000 cards, 200 columns, 500 checklist items on a card, 20,000 checklist items or comments in all; the message gives the numbers), `503` + `Retry-After: 5` when 2 imports are already running |
 | GET | `/board-templates` | Template catalogue: `[{key, name, description, columns: [{title, color, isDone}]}]` |
 | GET | `/projects/{id}` | Single project + columns + counts + `brief` (the board brief, Markdown; read it before working on the board's cards) |
-| PATCH | `/projects/{id}` | Partial update (incl. `brief` (up to 20,000 characters, board admins only), `visibility`, `backgroundColor`, `showMilestones`, `showArchived`, `showFiles`) |
+| PATCH | `/projects/{id}` | Partial update (incl. `brief` (up to 20,000 characters, board admins only), `visibility`, `backgroundColor`, `showMilestones`, `showArchived`, `showFiles`, `personCardLimit` (1 to 999, or null for no limit; board admins only)) |
 | DELETE | `/projects/{id}` | Cascading delete |
 | GET | `/projects/{id}/export?format=json\|csv` | Export the board (project, columns, cards, comments, attachment metadata). Defaults to JSON. JSON is version 2: columns carry `isDone` and `cardLimit`, cards carry `checklist` (`[{text, done}]`) |
 | POST | `/projects/{id}/share` | Enable public read-only sharing → `{publicToken}` |
@@ -100,6 +100,7 @@ Highlights:
 | GET | `/projects/{id}/background-image` | Download the board background bytes |
 | DELETE | `/projects/{id}/background-image` | Remove the background. Board-admin only |
 | GET | `/projects/{id}/events` | **SSE stream** (realtime), NOT an activity log - see pitfall 19 |
+| GET | `/projects/{id}/workload` | Open cards per person (not archived, not in a done column) → `{personCardLimit, people}`; each person has `userId` (null for the unassigned row, last), `name`, `active`, `queued` (cards in the first open column, unless it has a card limit), `overdue`, `dueSoon` (today to 6 days out, UTC), `highPriority`, `overLimit`. Only people with open cards are listed |
 | GET | `/projects/{id}/activity` | Board activity feed, newest first: cards added / moved / archived / restored / deleted, priority, assignee, comments (`excerpt`), columns added / renamed / deleted. Query: `before` (the previous page's `nextBefore`, opaque), `limit` (default 50, max 100), `actor` (user id), `type` (comma-separated) → `{items, nextBefore}`. `cardId` only while the card is still on this board; deleted cards keep `cardTitle`. Kept 12 months |
 | GET | `/cards/{id}/attachments` | List attachments on a card |
 | POST | `/cards/{id}/attachments` | Upload file (`multipart/form-data`, field `file`, max 25 MiB; Pro workspace) |
